@@ -1,101 +1,92 @@
-/* js/db/storage-adapter.js — VERSÃO AUTÔNOMA (não depende de pouch-init.js) */
+/* js/db/storage-adapter.js — VERSÃO ULTRA-FINAL (100% autônoma) */
 
 // ================================================================
-// FALLBACK COMPLETO — Se PouchDB não carregar, usa localStorage
+// PASSO 1: GARANTE QUE PouchInit EXISTE (mesmo sem pouch-init.js)
 // ================================================================
 
-// Cria o PouchDB falso ANTES de qualquer coisa
-if (typeof PouchDB === 'undefined') {
-  console.warn('⚠️ PouchDB não carregou! Usando localStorage fallback.');
-  
-  // Construtor falso
-  window.PouchDB = function(dbName) {
-    this._name = dbName || 'fallback';
-    this._prefix = 'pouch_' + this._name + '_';
-    return this;
-  };
+(function() {
+  // Se PouchInit já existe, não faz nada
+  if (typeof window.PouchInit !== 'undefined') {
+    console.log('✅ PouchInit já existe');
+    return;
+  }
 
-  // Prototype do PouchDB falso
-  window.PouchDB.prototype = {
-    put: function(doc) {
-      const key = this._prefix + doc._id;
-      localStorage.setItem(key, JSON.stringify(doc));
-      return Promise.resolve({ ok: true, id: doc._id, rev: '1-xxx' });
-    },
-    get: function(id) {
-      const key = this._prefix + id;
-      const data = localStorage.getItem(key);
-      if (!data) return Promise.reject({ status: 404, message: 'Not found' });
-      return Promise.resolve(JSON.parse(data));
-    },
-    allDocs: function(opts = {}) {
-      const prefix = this._prefix;
-      const keys = Object.keys(localStorage);
-      const rows = keys
-        .filter(k => k.startsWith(prefix))
-        .map(k => {
-          const doc = JSON.parse(localStorage.getItem(k));
-          return { doc, id: doc._id };
-        });
-      return Promise.resolve({ rows });
-    },
-    remove: function(doc) {
-      const key = this._prefix + doc._id;
-      localStorage.removeItem(key);
-      return Promise.resolve({ ok: true });
-    },
-    query: function(view, options = {}) {
-      const prefix = this._prefix;
-      const keys = Object.keys(localStorage);
-      const docs = keys
-        .filter(k => k.startsWith(prefix))
-        .map(k => JSON.parse(localStorage.getItem(k)));
-      
-      let filtered = docs;
-      if (options.key && view.includes('by_username')) {
-        filtered = docs.filter(d => d.username === options.key);
-      }
-      if (options.key && view.includes('by_userId')) {
-        filtered = docs.filter(d => d.userId === options.key);
-      }
-      
-      return Promise.resolve({ rows: filtered.map(d => ({ doc: d })) });
-    },
-    sync: function() {
-      const self = this;
-      return {
-        on: function(event, callback) { return self; },
-        cancel: function() { console.log('Sync cancelado (fallback)'); }
-      };
-    },
-    changes: function() {
-      const self = this;
-      return {
-        on: function(event, callback) { return self; },
-        cancel: function() { console.log('Changes cancelado (fallback)'); }
-      };
-    }
-  };
+  console.warn('⚠️ PouchInit não encontrado! Criando fallback...');
 
-  // Cria o PouchInit falso para compatibilidade
+  // Se PouchDB não existe, cria um falso
+  if (typeof window.PouchDB === 'undefined') {
+    console.warn('⚠️ PouchDB não encontrado! Criando fallback localStorage...');
+    
+    window.PouchDB = function(dbName) {
+      this._name = dbName || 'fallback';
+      this._prefix = 'pouch_' + this._name + '_';
+      return this;
+    };
+
+    window.PouchDB.prototype = {
+      put: function(doc) {
+        const key = this._prefix + doc._id;
+        localStorage.setItem(key, JSON.stringify(doc));
+        return Promise.resolve({ ok: true, id: doc._id, rev: '1-xxx' });
+      },
+      get: function(id) {
+        const key = this._prefix + id;
+        const data = localStorage.getItem(key);
+        if (!data) return Promise.reject({ status: 404, message: 'Not found' });
+        return Promise.resolve(JSON.parse(data));
+      },
+      allDocs: function(opts = {}) {
+        const prefix = this._prefix;
+        const keys = Object.keys(localStorage);
+        const rows = keys
+          .filter(k => k.startsWith(prefix))
+          .map(k => ({ doc: JSON.parse(localStorage.getItem(k)) }));
+        return Promise.resolve({ rows });
+      },
+      remove: function(doc) {
+        const key = this._prefix + doc._id;
+        localStorage.removeItem(key);
+        return Promise.resolve({ ok: true });
+      },
+      query: function() {
+        return Promise.resolve({ rows: [] });
+      },
+      sync: function() {
+        return { on: function() {}, cancel: function() {} };
+      },
+      changes: function() {
+        return { on: function() {}, cancel: function() {} };
+      }
+    };
+  }
+
+  // Cria o PouchInit
   window.PouchInit = {
     _db: null,
+    
     init: function(dbName) {
-      console.log('📦 Fallback: PouchInit.init(' + dbName + ')');
-      this._db = new PouchDB(dbName);
+      console.log('📦 PouchInit.init(' + dbName + ')');
+      this._db = new PouchDB(dbName || 'grimorio_db');
       return this._db;
     },
-    getDb: function() { return this._db; },
+    
+    getDb: function() { 
+      if (!this._db) this.init();
+      return this._db; 
+    },
+    
     save: function(doc) {
-      if (!this._db) this.init('fallback_db');
+      if (!this._db) this.init();
       return this._db.put(doc);
     },
+    
     get: function(id) {
-      if (!this._db) this.init('fallback_db');
+      if (!this._db) this.init();
       return this._db.get(id);
     },
+    
     getAll: function(type) {
-      if (!this._db) this.init('fallback_db');
+      if (!this._db) this.init();
       return this._db.allDocs({ include_docs: true })
         .then(result => {
           return result.rows
@@ -103,42 +94,54 @@ if (typeof PouchDB === 'undefined') {
             .filter(doc => doc.type === type);
         });
     },
+    
     remove: function(id) {
-      if (!this._db) this.init('fallback_db');
-      return this._db.get(id).then(doc => this._db.remove(doc));
+      if (!this._db) this.init();
+      return this._db.get(id)
+        .then(doc => this._db.remove(doc));
     },
+    
     query: function(view, options) {
-      if (!this._db) this.init('fallback_db');
+      if (!this._db) this.init();
       return this._db.query(view, options);
     },
-    sync: function(remoteUrl) {
-      if (!this._db) this.init('fallback_db');
-      return this._db.sync(remoteUrl);
+    
+    sync: function(remoteUrl, options = {}) {
+      if (!this._db) this.init();
+      return this._db.sync(remoteUrl, options);
     },
-    stopSync: function() { console.log('Sync interrompido (fallback)'); },
-    getSyncStatus: function() { return { isSyncing: false, remoteUrl: null }; },
+    
+    stopSync: function() {
+      console.log('🛑 Sync interrompido');
+    },
+    
+    getSyncStatus: function() {
+      return { isSyncing: false, remoteUrl: null };
+    },
+    
     backup: function() {
-      const prefix = 'pouch_fallback_db_';
-      const keys = Object.keys(localStorage);
-      const docs = keys
-        .filter(k => k.startsWith(prefix))
-        .map(k => JSON.parse(localStorage.getItem(k)));
-      const json = JSON.stringify(docs, null, 2);
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'grimorio_backup_' + new Date().toISOString().slice(0,10) + '.json';
-      a.click();
-      URL.revokeObjectURL(url);
-      return Promise.resolve(docs);
+      if (!this._db) this.init();
+      return this._db.allDocs({ include_docs: true })
+        .then(result => {
+          const docs = result.rows.map(row => row.doc);
+          const json = JSON.stringify(docs, null, 2);
+          const blob = new Blob([json], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'grimorio_backup_' + new Date().toISOString().slice(0,10) + '.json';
+          a.click();
+          URL.revokeObjectURL(url);
+          return docs;
+        });
     },
+    
     restore: function(jsonData) {
-      if (!this._db) this.init('fallback_db');
+      if (!this._db) this.init();
       const docs = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
-      const promises = docs.map(d => this._db.put(d));
-      return Promise.all(promises);
+      return this._db.bulkDocs(docs);
     },
+    
     destroy: function() {
       if (this._db) {
         const name = this._db._name;
@@ -151,93 +154,62 @@ if (typeof PouchDB === 'undefined') {
     }
   };
 
-  console.log('✅ Fallback localStorage ativado!');
-}
+  console.log('✅ PouchInit fallback criado com sucesso!');
+})();
 
 // ================================================================
-// STORAGE ADAPTER — USA PouchInit (real ou falso)
+// PASSO 2: STORAGE ADAPTER — USA PouchInit (real ou falso)
 // ================================================================
 
 const StorageAdapter = (() => {
   let currentUser = null;
   let initialized = false;
 
-  // ── Inicialização ──
   function init() {
     if (initialized) return Promise.resolve();
     
     // Garante que o PouchInit existe
     if (typeof PouchInit === 'undefined') {
-      console.warn('⚠️ PouchInit não definido! Criando fallback de emergência...');
-      // Já criamos o fallback acima, mas por segurança recriamos
+      console.error('❌ PouchInit ainda não definido!');
+      // Recria na hora
       window.PouchInit = {
         _db: null,
         init: function(dbName) {
           this._db = new PouchDB(dbName || 'emergency_db');
           return this._db;
         },
-        getDb: function() { return this._db; },
-        save: function(doc) {
-          if (!this._db) this.init();
-          return this._db.put(doc);
-        },
         get: function(id) {
           if (!this._db) this.init();
           return this._db.get(id);
         },
-        getAll: function(type) {
+        put: function(doc) {
           if (!this._db) this.init();
-          return this._db.allDocs({ include_docs: true })
-            .then(result => result.rows.map(row => row.doc).filter(doc => doc.type === type));
+          return this._db.put(doc);
+        },
+        save: function(doc) {
+          if (!this._db) this.init();
+          return this._db.put(doc);
         },
         remove: function(id) {
           if (!this._db) this.init();
           return this._db.get(id).then(doc => this._db.remove(doc));
         },
-        query: function(view, options) {
-          if (!this._db) this.init();
-          return this._db.query(view, options);
-        },
+        query: function() { return Promise.resolve({ rows: [] }); },
         sync: function() { return { on: function() {}, cancel: function() {} }; },
         stopSync: function() {},
         getSyncStatus: function() { return { isSyncing: false }; },
-        backup: function() {
-          const prefix = 'pouch_emergency_db_';
-          const keys = Object.keys(localStorage);
-          const docs = keys.filter(k => k.startsWith(prefix)).map(k => JSON.parse(localStorage.getItem(k)));
-          const json = JSON.stringify(docs, null, 2);
-          const blob = new Blob([json], { type: 'application/json' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = 'backup.json';
-          a.click();
-          return Promise.resolve(docs);
-        },
-        restore: function(jsonData) {
-          if (!this._db) this.init();
-          const docs = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
-          const promises = docs.map(d => this._db.put(d));
-          return Promise.all(promises);
-        },
-        destroy: function() {
-          const prefix = 'pouch_emergency_db_';
-          const keys = Object.keys(localStorage);
-          keys.filter(k => k.startsWith(prefix)).forEach(k => localStorage.removeItem(k));
-          this._db = null;
-          return Promise.resolve({ ok: true });
-        }
+        backup: function() { return Promise.resolve([]); },
+        restore: function() { return Promise.resolve(); },
+        destroy: function() { return Promise.resolve({ ok: true }); }
       };
     }
 
     PouchInit.init('grimorio_db');
     initialized = true;
     
-    // Migra dados do localStorage se existirem
     return migrateFromLocalStorage().catch(() => {});
   }
 
-  // ── Migração do localStorage ──
   function migrateFromLocalStorage() {
     return new Promise((resolve) => {
       try {
@@ -264,7 +236,7 @@ const StorageAdapter = (() => {
             };
             PouchInit.save(doc);
           });
-          console.log('✅ [Migration] Usuários migrados do localStorage');
+          console.log('✅ [Migration] Usuários migrados');
         }
 
         const sessionJson = localStorage.getItem('grimorio_session');
@@ -297,13 +269,13 @@ const StorageAdapter = (() => {
 
         resolve();
       } catch (e) {
-        console.warn('⚠️ [Migration] Erro na migração:', e);
+        console.warn('⚠️ [Migration] Erro:', e);
         resolve();
       }
     });
   }
 
-  // ── Usuários ──
+  // ── USUÁRIOS ──
   function getCurrentUser() { return currentUser; }
 
   function setCurrentUser(user) {
@@ -346,10 +318,13 @@ const StorageAdapter = (() => {
           _id: 'user_' + crypto.randomUUID(),
           id: crypto.randomUUID(),
           username, password,
-          displayName: username, avatar: '', frame: 'none',
-          background: '', bgBrightness: 25, bio: '',
-          recoveryKeyword: '', characters: [], systems: [],
-          type: 'user', createdAt: new Date().toISOString()
+          displayName: username,
+          avatar: '', frame: 'none',
+          background: '', bgBrightness: 25,
+          bio: '', recoveryKeyword: '',
+          characters: [], systems: [],
+          type: 'user',
+          createdAt: new Date().toISOString()
         };
         return PouchInit.save(user);
       })
@@ -393,7 +368,7 @@ const StorageAdapter = (() => {
       .then(() => { currentUser = null; localStorage.removeItem('grimorio_session'); return { message: 'Usuário excluído' }; });
   }
 
-  // ── Personagens ──
+  // ── PERSONAGENS ──
   function getCharacters() {
     if (!currentUser) return Promise.resolve([]);
     return PouchInit.query('characters/by_userId', { key: currentUser.id, include_docs: true })
@@ -406,6 +381,7 @@ const StorageAdapter = (() => {
 
   function saveCharacter(charData) {
     if (!currentUser) return Promise.reject('Nenhum usuário logado');
+    
     const doc = {
       _id: charData._id || (charData.id ? 'char_' + charData.id : 'char_' + crypto.randomUUID()),
       id: charData.id || crypto.randomUUID(),
@@ -423,6 +399,7 @@ const StorageAdapter = (() => {
       skillExtraBonuses: charData.skillExtraBonuses || {},
       createdAt: charData.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      // D&D
       level: charData.level || 1,
       cls: charData.cls || '',
       clsId: charData.clsId || '',
@@ -435,6 +412,7 @@ const StorageAdapter = (() => {
       slots: charData.slots || {},
       skillProfs: charData.skillProfs || {},
       skillExpertise: charData.skillExpertise || {},
+      // OP
       age: charData.age || '',
       origin: charData.origin || '',
       originId: charData.originId || '',
@@ -445,6 +423,7 @@ const StorageAdapter = (() => {
       nexLevel: charData.nexLevel ?? 0,
       nexPercent: charData.nexPercent ?? 0,
       trilhas: charData.trilhas || { Sobrevivência: 0, Habilidades: 0, Poderes: 0, Rituais: 0 },
+      // Custom
       customSysName: charData.customSysName || 'Sistema Próprio',
       customStatKeys: charData.customStatKeys || [],
       customStatLabels: charData.customStatLabels || {},
@@ -453,6 +432,7 @@ const StorageAdapter = (() => {
       customTheme: charData.customTheme || 'arcano',
       customResources: charData.customResources || []
     };
+    
     return PouchInit.save(doc)
       .then(() => PouchInit.get('user_' + currentUser.id))
       .then(user => {
@@ -479,7 +459,7 @@ const StorageAdapter = (() => {
       });
   }
 
-  // ── Sistemas ──
+  // ── SISTEMAS ──
   function getSystems() {
     if (!currentUser) return Promise.resolve([]);
     return PouchInit.get('user_' + currentUser.id).then(user => user.systems || []).catch(() => []);
@@ -511,26 +491,42 @@ const StorageAdapter = (() => {
       });
   }
 
-  // ── Sincronização ──
+  // ── SINCRONIZAÇÃO ──
   function syncWithServer(remoteUrl, options = {}) { return PouchInit.sync(remoteUrl, options); }
   function stopSync() { PouchInit.stopSync(); }
   function getSyncStatus() { return PouchInit.getSyncStatus(); }
 
-  // ── Backup ──
+  // ── BACKUP ──
   function backup() { return PouchInit.backup(); }
   function restore(jsonData) { return PouchInit.restore(jsonData); }
 
-  // ── API Pública ──
+  // ── API ──
   return {
-    init, getCurrentUser, setCurrentUser, loadSession, loadUserFromSession,
-    registerUser, loginUser, recoverAccount, updateUser, deleteUser,
-    getCharacters, getCharacter, saveCharacter, deleteCharacter,
-    getSystems, saveSystem, deleteSystem,
-    syncWithServer, stopSync, getSyncStatus,
-    backup, restore
+    init,
+    getCurrentUser,
+    setCurrentUser,
+    loadSession,
+    loadUserFromSession,
+    registerUser,
+    loginUser,
+    recoverAccount,
+    updateUser,
+    deleteUser,
+    getCharacters,
+    getCharacter,
+    saveCharacter,
+    deleteCharacter,
+    getSystems,
+    saveSystem,
+    deleteSystem,
+    syncWithServer,
+    stopSync,
+    getSyncStatus,
+    backup,
+    restore
   };
 })();
 
 // Exporta globalmente
 window.StorageAdapter = StorageAdapter;
-console.log('✅ StorageAdapter carregado com fallback!');
+console.log('✅ StorageAdapter carregado!');

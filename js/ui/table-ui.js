@@ -370,11 +370,11 @@ const TableUI = (() => {
 
   // ── API Pública ──
   return {
-    renderTableManager,
-    renderTableScreen,
-    openTable,
-    checkTableLink,
-    TableSystem
+    renderTableManager: renderTableManager,
+    renderTableScreen: renderTableScreen,
+    openTable: openTable,
+    checkTableLink: checkTableLink,
+    TableSystem: TableSystem
   };
 
 })();
