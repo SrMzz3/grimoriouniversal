@@ -1,0 +1,262 @@
+================================================================================
+                    GRIMÓRIO UNIVERSAL - EXPLICAÇÃO DAS CLASSES
+================================================================================
+
+Este documento explica a arquitetura de classes do sistema de personagens
+do Grimório Universal. O código utiliza uma abordagem orientada a objetos
+com uma classe base e subclasses específicas para cada sistema de RPG
+(D&D 5e, Ordem Paranormal e Sistema Próprio).
+
+================================================================================
+1.  VISÃO GERAL
+================================================================================
+
+O sistema de personagens é composto por:
+
+- Character (classe base): define campos e métodos comuns a todos os sistemas.
+- DnDCharacter (subclasse): estende Character com campos e métodos específicos
+  do D&D 5e (nível, classe, raça, slots de magia, proficiências, etc.).
+- OPCharacter (subclasse): estende Character com campos e métodos específicos
+  do Ordem Paranormal (NEX, PE, Sanidade, trilhas, etc.).
+- CustomCharacter (subclasse): estende Character com campos e métodos específicos
+  para o Sistema Próprio (atributos customizados, perícias, dados, temas, etc.).
+- CharacterFactory (fábrica): cria a instância correta com base no sysId.
+
+Além disso, os arquivos de dados (DND, OP) fornecem as informações estáticas
+(raças, classes, perícias, etc.) usadas pelas classes.
+
+================================================================================
+2.  CLASSE Character (js/classes/Character.js)
+================================================================================
+
+A classe base contém campos e métodos que são comuns a todos os personagens,
+independentemente do sistema.
+
+2.1. CAMPOS
+
+| Campo          | Tipo     | Descrição                                      |
+|----------------|----------|------------------------------------------------|
+| id             | string   | Identificador único (gerado com crypto.randomUUID()) |
+| sysId          | string   | 'dnd', 'op' ou 'custom'                        |
+| name           | string   | Nome do personagem                             |
+| stats          | object   | Atributos (ex: { str: 10, dex: 14, ... })      |
+| hpCur          | number   | HP atual                                       |
+| hpMax          | number   | HP máximo                                      |
+| abilities      | array    | Lista de habilidades/poderes [nome, bonus, desc] |
+| equip          | array    | Lista de equipamentos [nome, qtd, obs]         |
+| notes          | string   | Anotações do personagem                        |
+| skillTrainingLevel | object | Grau de treinamento por perícia { "Perícia": 5 } |
+| skillExtraBonuses | object | Bônus extras por perícia { "Perícia": 2 }     |
+| createdAt      | string   | Data de criação (ISO)                          |
+| updatedAt      | string   | Data da última modificação (ISO)               |
+
+2.2. MÉTODOS PRINCIPAIS
+
+- getStat(key): retorna o valor de um atributo.
+- setStat(key, value): define um atributo e marca como atualizado.
+- takeDamage(amount): reduz HP (não fica negativo).
+- heal(amount): recupera HP (não ultrapassa HP máximo).
+- setMaxHP(value): define HP máximo e ajusta HP atual se necessário.
+- isAlive(): retorna true se HP > 0.
+- hpPercent(): retorna a porcentagem de HP (0 a 100).
+- addAbility(name, bonus, desc): adiciona uma habilidade.
+- removeAbility(index): remove habilidade pelo índice.
+- addItem(name, qty, obs): adiciona um item ao inventário.
+- removeItem(index): remove item pelo índice.
+- toJSON(): serializa o personagem para JSON (inclui todos os campos).
+- fromJSON(data): cria uma instância a partir de um objeto JSON.
+
+2.3. MÉTODOS INTERNOS
+
+- _touch(): atualiza o timestamp de modificação.
+
+3.  CLASSE DnDCharacter (js/classes/DnDCharacter.js)
+================================================================================
+
+Estende Character e adiciona campos e métodos específicos do D&D 5e.
+
+3.1. CAMPOS ADICIONAIS
+
+| Campo          | Tipo     | Descrição                                      |
+|----------------|----------|------------------------------------------------|
+| level          | number   | Nível do personagem (1 a 20)                   |
+| cls            | string   | Nome da classe (ex: "Guerreiro")               |
+| clsId          | string   | ID da classe (ex: "fighter")                   |
+| race           | string   | Nome da raça (ex: "Humano")                    |
+| raceId         | string   | ID da raça (ex: "human")                       |
+| subrace        | string   | Nome da sub-raça (ex: "Anão da Colina")        |
+| subraceId      | string   | ID da sub-raça (ex: "hill")                    |
+| subclass       | string   | Nome da subclasse (ex: "Caminho do Furioso")   |
+| subclassId     | string   | ID da subclasse (ex: "berserker")              |
+| slots          | object   | Espaços de magia { "1": [0,0,0], "2": [0,0] }  |
+| skillProfs     | object   | Perícias com proficiência { "Atletismo": true }|
+| skillExpertise | object   | Perícias com expertise { "Atletismo": true }   |
+
+3.2. MÉTODOS ESPECÍFICOS
+
+- getProficiencyBonus(): retorna o bônus de proficiência baseado no nível.
+- getMod(statKey): retorna o modificador de um atributo ( (valor - 10) / 2 ).
+- getModStr(statKey): retorna o modificador formatado (+2, -1, etc.).
+- getAC(): calcula a Defesa (10 + mod de Destreza).
+- getInitiative(): retorna o modificador de Iniciativa (mod de Destreza).
+- getSkillBonus(skillName): retorna o bônus total de uma perícia
+  (mod de atributo + proficiência + expertise, se houver).
+- hasSlot(level): verifica se há um slot de magia disponível.
+- useSlot(level): usa um slot de magia (marca como usado).
+- restoreSlots(level): restaura todos os slots de um nível.
+
+4.  CLASSE OPCharacter (js/classes/OPCharacter.js)
+================================================================================
+
+Estende Character e adiciona campos e métodos específicos do Ordem Paranormal.
+
+4.1. CAMPOS ADICIONAIS
+
+| Campo          | Tipo     | Descrição                                      |
+|----------------|----------|------------------------------------------------|
+| age            | string   | Idade do personagem                            |
+| origin         | string   | Nome da origem (ex: "Investigador")            |
+| originId       | string   | ID da origem (ex: "investigator")              |
+| peCur          | number   | Pontos de Esforço atuais                       |
+| peMax          | number   | Pontos de Esforço máximos                      |
+| sanCur         | number   | Sanidade atual                                 |
+| sanMax         | number   | Sanidade máxima                                |
+| nexLevel       | number   | Nível de Exposição Paranormal (índice 0 a 20)  |
+| nexPercent     | number   | NEX em percentual (0, 5, 10, ..., 95, 99)     |
+| trilhas        | object   | Progresso nas trilhas { "Sobrevivência": 0, ... } |
+
+4.2. MÉTODOS ESPECÍFICOS
+
+- getBonus(statKey): retorna o bônus do atributo (valor - 1, mínimo 0).
+- getBonusStr(statKey): retorna o bônus formatado (+1, +2, etc.).
+- getDefesa(): calcula a Defesa (10 + bônus de Agilidade).
+- getMaxPV(): calcula o PV máximo com base na classe, Vigor e NEX.
+- getMaxPE(): calcula o PE máximo com base na classe, Presença e NEX.
+- getMaxSanidade(): calcula a Sanidade máxima com base na classe e NEX.
+- getNEXLabel(): retorna o rótulo do NEX (ex: "35%").
+- advanceNEX(): aumenta o NEX em um nível e recalcula derivados.
+- setTrilhaLevel(name, level): define o nível de uma trilha.
+- advanceTrilha(name): aumenta uma trilha em 1 (máx 3).
+- recalcDerived(): recalcula HP, PE, Sanidade e Defesa após mudanças.
+
+OBS: O construtor de OPCharacter detecta se o personagem é novo (flag _isNew)
+e recalcula automaticamente os valores derivados se estiverem zerados.
+
+5.  CLASSE CustomCharacter (js/classes/CustomCharacter.js)
+================================================================================
+
+Estende Character e adiciona campos e métodos para o Sistema Próprio.
+
+5.1. CAMPOS ADICIONAIS
+
+| Campo              | Tipo     | Descrição                                      |
+|--------------------|----------|------------------------------------------------|
+| customSysName      | string   | Nome do sistema customizado                    |
+| customStatKeys     | array    | Lista de chaves dos atributos (ex: ["for", "mana"]) |
+| customStatLabels   | object   | Mapeamento chave -> label { "for": "Força" }   |
+| customSkills       | array    | Lista de nomes das perícias                    |
+| customDiceSet      | array    | Lista de dados disponíveis (ex: ["d4","d6"])   |
+| customTheme        | string   | Tema visual (arcano, tecnologico, sombrio, minimalista) |
+| customResources    | array    | Recursos personalizados [ { name, max, cur } ] |
+
+5.2. MÉTODOS ESPECÍFICOS
+
+- getResource(name): retorna o valor atual de um recurso.
+- setResource(name, value): define o valor atual de um recurso.
+- addResource(name, max, cur): adiciona um recurso.
+- removeResource(name): remove um recurso pelo nome.
+- getStatNames(): retorna os nomes dos atributos na ordem definida.
+- hasDice(diceStr): verifica se um dado está disponível.
+
+6.  CLASSE CharacterFactory (js/classes/CharacterFactory.js)
+================================================================================
+
+Fábrica estática que cria a instância correta com base no sysId.
+
+6.1. MÉTODOS
+
+- create(data): recebe um objeto bruto (do localStorage) e retorna a instância
+  apropriada (DnDCharacter, OPCharacter ou CustomCharacter).
+- createEmpty(sysId): cria um personagem vazio para um sistema específico,
+  inicializando os campos padrão (ex: para D&D, level=1, slots={}, etc.).
+
+7.  INTEGRAÇÃO COM O RESTO DO SISTEMA
+================================================================================
+
+7.1. Criação de Personagem (build.js)
+
+- As funções renderDnD(), renderOP() e renderCustom() montam formulários
+  interativos para o jogador preencher os dados.
+- Ao confirmar, a função cria uma instância da subclasse apropriada
+  (ex: new DnDCharacter({ ... })) e a passa para App.setChar().
+
+7.2. Armazenamento (app.js e storage.js)
+
+- App.setChar(char) armazena o personagem em memória e chama App.saveChar().
+- App.saveChar() serializa via char.toJSON() e salva no localStorage.
+- GrimorioStorage.saveCharacter(char) também serializa e atualiza a lista
+  de personagens do usuário logado.
+- Ao carregar, CharacterFactory.create(data) é usada para reconstruir
+  a instância correta a partir do JSON.
+
+7.3. Exibição na Ficha (sheet.js)
+
+- SheetScreen.render() obtém o personagem via App.getChar().
+- Ele verifica char.sysId para determinar qual sistema está em uso,
+  e então renderiza os componentes apropriados (estatísticas, barras,
+  perícias, habilidades, equipamentos, etc.).
+- Métodos específicos de cada classe (getMod, getBonus, getDefesa, etc.)
+  são chamados durante a renderização para exibir valores calculados.
+
+8.  DIAGRAMA DE HERANÇA
+================================================================================
+
++-----------------+
+|    Character    |
+|  (classe base)  |
++-----------------+
+       |
+       +------------------+------------------+
+       |                  |                  |
++------+------+  +--------+--------+  +-----+------+
+|DnDCharacter|  |  OPCharacter   |  |CustomCharacter|
+|  (D&D 5e)  |  |(Ordem Paranormal)|  |(Sistema Próprio)|
++-------------+  +----------------+  +-------------+
+
++---------------------+
+| CharacterFactory    |
+| (fábrica estática)  |
++---------------------+
+  create(data) -> Character
+
+9.  EXEMPLO DE FLUXO
+================================================================================
+
+1. O jogador preenche o formulário de criação de personagem em build.js.
+2. Ao clicar em "Criar", uma instância da subclasse apropriada é criada,
+   por exemplo: new OPCharacter({ name: "Bianca", clsId: "especialista", ... }).
+3. O construtor de OPCharacter chama recalcDerived() para calcular PV, PE, etc.
+4. O personagem é passado para App.setChar(char), que o salva no localStorage
+   via char.toJSON() e GrimorioStorage.saveCharacter().
+5. Na tela de ficha (sheet.js), o personagem é carregado via CharacterFactory.create()
+   a partir do JSON salvo, restaurando todos os campos.
+6. A ficha renderiza os dados, chamando métodos como char.getDefesa(),
+   char.getBonusStr("for"), etc., para exibir valores calculados.
+
+10. PONTOS DE ATENÇÃO
+================================================================================
+
+- Todos os personagens devem ser serializados via toJSON() para garantir
+  que os campos customizados sejam salvos.
+- As subclasses devem chamar super(data) para inicializar os campos base.
+- O CharacterFactory é essencial para reconstruir corretamente a instância
+  com base no sysId, pois o JavaScript não mantém a classe original após
+  a serialização JSON.
+- Os métodos de recálculo (como recalcDerived em OPCharacter) devem ser
+  chamados no construtor para garantir que os valores estejam consistentes.
+- A flag _isNew em OPCharacter é usada para evitar recalcular valores
+  que já foram salvos, preservando alterações manuais do jogador.
+
+================================================================================
+FIM DA EXPLICAÇÃO
+================================================================================

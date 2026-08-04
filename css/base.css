@@ -1,0 +1,114 @@
+/* ═══════════════════════════════════════════
+   BASE.CSS — Reset, variáveis, tipografia
+═══════════════════════════════════════════ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  /* Paleta principal */
+  --ink:         #f0e8d4;
+  --ink-dim:     #c0b090;
+  --ink-faint:   #8a7a6a;
+  --parch:       #09080605;
+  --parch-s:     #090806;
+  --parch-2:     #100f0c;
+  --parch-3:     #181713;
+  --parch-4:     #201e17;
+  --parch-5:     #28251c;
+
+  /* Dourado D&D */
+  --gold:        #d4b84b;
+  --gold-dim:    #9a7a30;
+  --gold-light:  #f0d87d;
+  --gold-glow:   rgba(212, 184, 75, 0.25);
+  --gold-glow-2: rgba(212, 184, 75, 0.45);
+
+  /* Paranormal OP */
+  --op-cyan:     #00f0ff;
+  --op-cyan-dim: #009aaf;
+  --op-glow:     rgba(0, 240, 255, 0.2);
+  --op-purple:   #8a4af0;
+
+  /* Status */
+  --green:       #66e899;
+  --yellow:      #fcd34d;
+  --red:         #f87171;
+  --purple:      #b89af0;
+  --crimson:     #b02020;
+
+  /* Bordas */
+  --border:      #3a3528;
+  --border-2:    #4a4535;
+  --border-3:    #5a5545;
+
+  --r:           6px;
+  --r-md:        10px;
+  --r-lg:        14px;
+  --r-xl:        20px;
+
+  --shadow-sm:   0 2px 8px rgba(0,0,0,0.6);
+  --shadow-md:   0 4px 20px rgba(0,0,0,0.7);
+  --shadow-lg:   0 8px 40px rgba(0,0,0,0.85);
+  --shadow-gold: 0 0 30px rgba(212,184,75,0.25);
+  --shadow-op:   0 0 30px rgba(0,240,255,0.2);
+
+  --t-fast:  0.15s ease;
+  --t-med:   0.25s ease;
+  --t-slow:  0.4s ease;
+}
+
+html, body {
+  background: var(--parch-s);
+  color: var(--ink);
+  font-family: 'Crimson Text', Georgia, serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--parch-2); }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-3); }
+
+::selection { background: var(--gold-glow-2); color: var(--gold-light); }
+
+input, textarea, select {
+  font-family: 'Crimson Text', Georgia, serif;
+  background: var(--parch-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  color: var(--ink);
+  padding: 8px 12px;
+  font-size: 15px;
+  outline: none;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+  width: 100%;
+}
+input:focus, textarea:focus, select:focus {
+  border-color: var(--gold-dim);
+  box-shadow: 0 0 0 2px var(--gold-glow);
+}
+input[type=number] { -moz-appearance: textfield; }
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button { display: none; }
+
+button { cursor: pointer; font-family: 'Crimson Text', Georgia, serif; }
+
+.font-cinzel   { font-family: 'Cinzel', serif; }
+.font-crimson  { font-family: 'Crimson Text', serif; }
+.font-fell     { font-family: 'IM Fell English', serif; }
+
+h1, h2, h3 { font-family: 'Cinzel', serif; }
+
+.hidden  { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+.w100    { width: 100%; }
+.text-gold    { color: var(--gold); }
+.text-dim     { color: var(--ink-dim); }
+.text-faint   { color: var(--ink-faint); }
+.text-center  { text-align: center; }
+.italic       { font-style: italic; }

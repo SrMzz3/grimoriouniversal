@@ -1,0 +1,679 @@
+/* js/db/storage-adapter.js — Adaptador de armazenamento com fallback localStorage */
+
+// ================================================================
+// PASSO 1: FALLBACK — Se PouchDB não carregar, usa localStorage
+// ================================================================
+if (typeof PouchDB === 'undefined') {
+  console.warn('⚠️ PouchDB não carregou! Usando localStorage fallback.');
+  
+  // Cria um PouchDB falso com localStorage
+  window.PouchDB = function(dbName) {
+    this._name = dbName;
+    this._prefix = 'pouch_' + dbName + '_';
+    return this;
+  };
+
+  window.PouchDB.prototype = {
+    put: function(doc) {
+      const key = this._prefix + doc._id;
+      localStorage.setItem(key, JSON.stringify(doc));
+      return Promise.resolve({ ok: true, id: doc._id, rev: '1-xxx' });
+    },
+    get: function(id) {
+      const key = this._prefix + id;
+      const data = localStorage.getItem(key);
+      if (!data) return Promise.reject({ status: 404, message: 'Not found' });
+      return Promise.resolve(JSON.parse(data));
+    },
+    allDocs: function(opts = {}) {
+      const prefix = this._prefix;
+      const keys = Object.keys(localStorage);
+      const rows = keys
+        .filter(k => k.startsWith(prefix))
+        .map(k => {
+          const doc = JSON.parse(localStorage.getItem(k));
+          return { doc, id: doc._id };
+        });
+      return Promise.resolve({ rows });
+    },
+    remove: function(doc) {
+      const key = this._prefix + doc._id;
+      localStorage.removeItem(key);
+      return Promise.resolve({ ok: true });
+    },
+    query: function(view, options = {}) {
+      const prefix = this._prefix;
+      const keys = Object.keys(localStorage);
+      const docs = keys
+        .filter(k => k.startsWith(prefix))
+        .map(k => JSON.parse(localStorage.getItem(k)));
+      
+      // Filtra pelo tipo se especificado
+      let filtered = docs;
+      if (options.key && view.includes('by_username')) {
+        filtered = docs.filter(d => d.username === options.key);
+      }
+      if (options.key && view.includes('by_userId')) {
+        filtered = docs.filter(d => d.userId === options.key);
+      }
+      
+      return Promise.resolve({ rows: filtered.map(d => ({ doc: d })) });
+    },
+    sync: function() {
+      const self = this;
+      return {
+        on: function(event, callback) {
+          if (event === 'change') {
+            // Não faz nada no fallback
+          }
+          if (event === 'error') {
+            // Não faz nada no fallback
+          }
+          return self;
+        },
+        cancel: function() {
+          console.log('Sync cancelado (fallback)');
+        }
+      };
+    },
+    changes: function() {
+      const self = this;
+      return {
+        on: function(event, callback) {
+          if (event === 'change') {
+            // Não faz nada no fallback
+          }
+          if (event === 'error') {
+            // Não faz nada no fallback
+          }
+          return self;
+        },
+        cancel: function() {
+          console.log('Changes cancelado (fallback)');
+        }
+      };
+    }
+  };
+
+  // Cria o PouchInit falso
+  window.PouchInit = {
+    _db: null,
+    init: function(dbName) {
+      console.log('📦 Fallback: PouchInit.init(' + dbName + ')');
+      this._db = new PouchDB(dbName);
+      return this._db;
+    },
+    getDb: function() { return this._db; },
+    save: function(doc) {
+      if (!this._db) this.init('fallback_db');
+      return this._db.put(doc);
+    },
+    get: function(id) {
+      if (!this._db) this.init('fallback_db');
+      return this._db.get(id);
+    },
+    getAll: function(type) {
+      if (!this._db) this.init('fallback_db');
+      return this._db.allDocs({ include_docs: true })
+        .then(result => {
+          return result.rows
+            .map(row => row.doc)
+            .filter(doc => doc.type === type);
+        });
+    },
+    remove: function(id) {
+      if (!this._db) this.init('fallback_db');
+      return this._db.get(id)
+        .then(doc => this._db.remove(doc));
+    },
+    query: function(view, options) {
+      if (!this._db) this.init('fallback_db');
+      return this._db.query(view, options);
+    },
+    sync: function(remoteUrl) {
+      if (!this._db) this.init('fallback_db');
+      return this._db.sync(remoteUrl);
+    },
+    stopSync: function() {
+      console.log('Sync interrompido (fallback)');
+    },
+    getSyncStatus: function() {
+      return { isSyncing: false, remoteUrl: null };
+    },
+    backup: function() {
+      const prefix = 'pouch_fallback_db_';
+      const keys = Object.keys(localStorage);
+      const docs = keys
+        .filter(k => k.startsWith(prefix))
+        .map(k => JSON.parse(localStorage.getItem(k)));
+      const json = JSON.stringify(docs, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'grimorio_backup_' + new Date().toISOString().slice(0,10) + '.json';
+      a.click();
+      URL.revokeObjectURL(url);
+      return Promise.resolve(docs);
+    },
+    restore: function(jsonData) {
+      if (!this._db) this.init('fallback_db');
+      const docs = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
+      const promises = docs.map(d => this._db.put(d));
+      return Promise.all(promises);
+    },
+    destroy: function() {
+      if (this._db) {
+        const name = this._db._name;
+        const prefix = 'pouch_' + name + '_';
+        const keys = Object.keys(localStorage);
+        keys.filter(k => k.startsWith(prefix)).forEach(k => localStorage.removeItem(k));
+        this._db = null;
+      }
+      return Promise.resolve({ ok: true });
+    }
+  };
+
+  console.log('✅ Fallback localStorage ativado!');
+}
+
+// ================================================================
+// PASSO 2: STORAGE ADAPTER PRINCIPAL
+// ================================================================
+
+const StorageAdapter = (() => {
+  let currentUser = null;
+  let initialized = false;
+
+  // ── Inicialização ──
+  function init() {
+    if (initialized) return Promise.resolve();
+    
+    // Se PouchInit não existir, cria um fallback
+    if (typeof PouchInit === 'undefined') {
+      console.warn('⚠️ PouchInit não definido! Criando fallback...');
+      window.PouchInit = {
+        init: function(dbName) {
+          this._db = new PouchDB(dbName || 'fallback_db');
+          return this._db;
+        },
+        getDb: function() { return this._db; },
+        save: function(doc) {
+          if (!this._db) this.init();
+          return this._db.put(doc);
+        },
+        get: function(id) {
+          if (!this._db) this.init();
+          return this._db.get(id);
+        },
+        getAll: function(type) {
+          if (!this._db) this.init();
+          return this._db.allDocs({ include_docs: true })
+            .then(result => result.rows.map(row => row.doc).filter(doc => doc.type === type));
+        },
+        remove: function(id) {
+          if (!this._db) this.init();
+          return this._db.get(id).then(doc => this._db.remove(doc));
+        },
+        query: function(view, options) {
+          if (!this._db) this.init();
+          return this._db.query(view, options);
+        },
+        sync: function(remoteUrl) {
+          if (!this._db) this.init();
+          return this._db.sync(remoteUrl);
+        },
+        stopSync: function() { console.log('Sync interrompido (fallback)'); },
+        getSyncStatus: function() { return { isSyncing: false, remoteUrl: null }; },
+        backup: function() {
+          if (!this._db) this.init();
+          return this._db.allDocs({ include_docs: true })
+            .then(result => {
+              const docs = result.rows.map(row => row.doc);
+              const json = JSON.stringify(docs, null, 2);
+              const blob = new Blob([json], { type: 'application/json' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = 'backup.json';
+              a.click();
+              return docs;
+            });
+        },
+        restore: function(jsonData) {
+          if (!this._db) this.init();
+          const docs = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
+          return this._db.bulkDocs(docs);
+        },
+        destroy: function() {
+          if (this._db) {
+            const name = this._db._name;
+            const prefix = 'pouch_' + name + '_';
+            const keys = Object.keys(localStorage);
+            keys.filter(k => k.startsWith(prefix)).forEach(k => localStorage.removeItem(k));
+            this._db = null;
+          }
+          return Promise.resolve({ ok: true });
+        }
+      };
+    }
+
+    PouchInit.init('grimorio_db');
+    initialized = true;
+    
+    // Migra dados do localStorage se existirem
+    return migrateFromLocalStorage().catch(() => {});
+  }
+
+  // ── Migração do localStorage para IndexedDB ──
+  function migrateFromLocalStorage() {
+    return new Promise((resolve) => {
+      try {
+        // Migrar usuários
+        const usersJson = localStorage.getItem('grimorio_users');
+        if (usersJson) {
+          const users = JSON.parse(usersJson);
+          users.forEach(user => {
+            const doc = {
+              _id: 'user_' + user.id,
+              id: user.id,
+              username: user.username,
+              password: user.password,
+              displayName: user.displayName || user.username,
+              avatar: user.avatar || '',
+              frame: user.frame || 'none',
+              background: user.background || '',
+              bgBrightness: user.bgBrightness || 25,
+              bio: user.bio || '',
+              recoveryKeyword: user.recoveryKeyword || '',
+              characters: user.characters || [],
+              systems: user.systems || [],
+              type: 'user',
+              createdAt: user.createdAt || new Date().toISOString()
+            };
+            PouchInit.save(doc);
+          });
+          console.log('✅ [Migration] Usuários migrados do localStorage');
+        }
+
+        // Migrar sessão
+        const sessionJson = localStorage.getItem('grimorio_session');
+        if (sessionJson) {
+          const session = JSON.parse(sessionJson);
+          const doc = {
+            _id: 'session_' + session.id,
+            userId: session.id,
+            username: session.username,
+            type: 'session',
+            createdAt: new Date().toISOString()
+          };
+          PouchInit.save(doc);
+          console.log('✅ [Migration] Sessão migrada');
+        }
+
+        // Migrar personagem atual
+        const charJson = localStorage.getItem('rpg_grimorio_v2');
+        if (charJson) {
+          const char = JSON.parse(charJson);
+          const doc = {
+            _id: 'char_' + (char.id || crypto.randomUUID()),
+            id: char.id || crypto.randomUUID(),
+            ...char,
+            type: 'character',
+            userId: currentUser ? currentUser.id : 'unknown'
+          };
+          PouchInit.save(doc);
+          console.log('✅ [Migration] Personagem migrado');
+        }
+
+        resolve();
+      } catch (e) {
+        console.warn('⚠️ [Migration] Erro na migração:', e);
+        resolve();
+      }
+    });
+  }
+
+  // ── Usuários ──
+
+  function getCurrentUser() {
+    return currentUser;
+  }
+
+  function setCurrentUser(user) {
+    currentUser = user;
+    if (user) {
+      const doc = {
+        _id: 'session_' + user.id,
+        userId: user.id,
+        username: user.username,
+        type: 'session',
+        updatedAt: new Date().toISOString()
+      };
+      PouchInit.save(doc);
+      localStorage.setItem('grimorio_session', JSON.stringify({ id: user.id, username: user.username }));
+    } else {
+      localStorage.removeItem('grimorio_session');
+    }
+  }
+
+  function loadSession() {
+    const sessionJson = localStorage.getItem('grimorio_session');
+    if (!sessionJson) return null;
+    try { return JSON.parse(sessionJson); }
+    catch { return null; }
+  }
+
+  function loadUserFromSession() {
+    const session = loadSession();
+    if (!session) return Promise.resolve(null);
+    
+    return PouchInit.get('user_' + session.id)
+      .then(doc => {
+        currentUser = doc;
+        return doc;
+      })
+      .catch(() => null);
+  }
+
+  function registerUser(username, password) {
+    return PouchInit.query('users/by_username', { key: username })
+      .then(result => {
+        if (result.rows.length > 0) {
+          throw new Error('Usuário já existe');
+        }
+        
+        const user = {
+          _id: 'user_' + crypto.randomUUID(),
+          id: crypto.randomUUID(),
+          username: username,
+          password: password,
+          displayName: username,
+          avatar: '',
+          frame: 'none',
+          background: '',
+          bgBrightness: 25,
+          bio: '',
+          recoveryKeyword: '',
+          characters: [],
+          systems: [],
+          type: 'user',
+          createdAt: new Date().toISOString()
+        };
+        
+        return PouchInit.save(user);
+      })
+      .then(result => {
+        return PouchInit.get(result._id);
+      });
+  }
+
+  function loginUser(username, password) {
+    return PouchInit.query('users/by_username', { key: username })
+      .then(result => {
+        if (result.rows.length === 0) {
+          throw new Error('Usuário não encontrado');
+        }
+        
+        const user = result.rows[0].doc;
+        if (user.password !== password) {
+          throw new Error('Senha incorreta');
+        }
+        
+        currentUser = user;
+        setCurrentUser(user);
+        return user;
+      });
+  }
+
+  function recoverAccount(username, keyword, newPassword) {
+    return PouchInit.query('users/by_username', { key: username })
+      .then(result => {
+        if (result.rows.length === 0) {
+          throw new Error('Usuário não encontrado');
+        }
+        
+        const user = result.rows[0].doc;
+        if (user.recoveryKeyword !== keyword) {
+          throw new Error('Palavra-chave incorreta');
+        }
+        
+        user.password = newPassword;
+        return PouchInit.save(user);
+      })
+      .then(() => ({ message: 'Senha alterada com sucesso' }));
+  }
+
+  function updateUser(userData) {
+    return PouchInit.get('user_' + userData.id)
+      .then(doc => {
+        Object.assign(doc, userData);
+        return PouchInit.save(doc);
+      })
+      .then(result => {
+        currentUser = result;
+        return result;
+      });
+  }
+
+  function deleteUser(userId) {
+    return PouchInit.remove('user_' + userId)
+      .then(() => {
+        return PouchInit.query('characters/by_userId', { key: userId, include_docs: true });
+      })
+      .then(result => {
+        const promises = result.rows.map(row => PouchInit.remove(row.doc._id));
+        return Promise.all(promises);
+      })
+      .then(() => {
+        currentUser = null;
+        localStorage.removeItem('grimorio_session');
+        return { message: 'Usuário excluído' };
+      });
+  }
+
+  // ── Personagens ──
+
+  function getCharacters() {
+    if (!currentUser) return Promise.resolve([]);
+    
+    return PouchInit.query('characters/by_userId', {
+      key: currentUser.id,
+      include_docs: true
+    }).then(result => {
+      return result.rows.map(row => row.doc);
+    });
+  }
+
+  function getCharacter(charId) {
+    return PouchInit.get('char_' + charId);
+  }
+
+  function saveCharacter(charData) {
+    if (!currentUser) {
+      return Promise.reject('Nenhum usuário logado');
+    }
+
+    const doc = {
+      _id: charData._id || (charData.id ? 'char_' + charData.id : 'char_' + crypto.randomUUID()),
+      id: charData.id || crypto.randomUUID(),
+      userId: currentUser.id,
+      type: 'character',
+      sysId: charData.sysId || 'custom',
+      name: charData.name || 'Sem nome',
+      stats: charData.stats || {},
+      hpCur: charData.hpCur ?? 0,
+      hpMax: charData.hpMax ?? 0,
+      abilities: charData.abilities || [],
+      equip: charData.equip || [],
+      notes: charData.notes || '',
+      skillTrainingLevel: charData.skillTrainingLevel || {},
+      skillExtraBonuses: charData.skillExtraBonuses || {},
+      createdAt: charData.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      // D&D
+      level: charData.level || 1,
+      cls: charData.cls || '',
+      clsId: charData.clsId || '',
+      race: charData.race || '',
+      raceId: charData.raceId || '',
+      subrace: charData.subrace || null,
+      subraceId: charData.subraceId || null,
+      subclass: charData.subclass || null,
+      subclassId: charData.subclassId || null,
+      slots: charData.slots || {},
+      skillProfs: charData.skillProfs || {},
+      skillExpertise: charData.skillExpertise || {},
+      // OP
+      age: charData.age || '',
+      origin: charData.origin || '',
+      originId: charData.originId || '',
+      peCur: charData.peCur ?? 0,
+      peMax: charData.peMax ?? 0,
+      sanCur: charData.sanCur ?? 0,
+      sanMax: charData.sanMax ?? 0,
+      nexLevel: charData.nexLevel ?? 0,
+      nexPercent: charData.nexPercent ?? 0,
+      trilhas: charData.trilhas || { Sobrevivência: 0, Habilidades: 0, Poderes: 0, Rituais: 0 },
+      // Custom
+      customSysName: charData.customSysName || 'Sistema Próprio',
+      customStatKeys: charData.customStatKeys || [],
+      customStatLabels: charData.customStatLabels || {},
+      customSkills: charData.customSkills || [],
+      customDiceSet: charData.customDiceSet || ['d4', 'd6', 'd8', 'd10', 'd12', 'd20'],
+      customTheme: charData.customTheme || 'arcano',
+      customResources: charData.customResources || []
+    };
+    
+    return PouchInit.save(doc)
+      .then(() => {
+        // Atualiza lista do usuário
+        return PouchInit.get('user_' + currentUser.id);
+      })
+      .then(user => {
+        if (!user.characters) user.characters = [];
+        const exists = user.characters.some(c => c.id === doc.id);
+        if (!exists) {
+          user.characters.push({ id: doc.id, name: doc.name, sysId: doc.sysId });
+          return PouchInit.save(user);
+        }
+        return user;
+      })
+      .then(() => doc);
+  }
+
+  function deleteCharacter(charId) {
+    if (!currentUser) {
+      return Promise.reject('Nenhum usuário logado');
+    }
+    
+    return PouchInit.remove('char_' + charId)
+      .then(() => {
+        return PouchInit.get('user_' + currentUser.id);
+      })
+      .then(user => {
+        if (user.characters) {
+          user.characters = user.characters.filter(c => c.id !== charId);
+          return PouchInit.save(user);
+        }
+        return user;
+      });
+  }
+
+  // ── Sistemas ──
+
+  function getSystems() {
+    if (!currentUser) return Promise.resolve([]);
+    return PouchInit.get('user_' + currentUser.id)
+      .then(user => user.systems || [])
+      .catch(() => []);
+  }
+
+  function saveSystem(sysData) {
+    if (!currentUser) {
+      return Promise.reject('Nenhum usuário logado');
+    }
+    
+    return PouchInit.get('user_' + currentUser.id)
+      .then(user => {
+        if (!user.systems) user.systems = [];
+        const exists = user.systems.some(s => s.id === sysData.id);
+        if (!exists) {
+          user.systems.push(sysData);
+          return PouchInit.save(user);
+        }
+        return user;
+      })
+      .then(() => sysData);
+  }
+
+  function deleteSystem(sysId) {
+    if (!currentUser) {
+      return Promise.reject('Nenhum usuário logado');
+    }
+    
+    return PouchInit.get('user_' + currentUser.id)
+      .then(user => {
+        if (user.systems) {
+          user.systems = user.systems.filter(s => s.id !== sysId);
+          return PouchInit.save(user);
+        }
+        return user;
+      });
+  }
+
+  // ── Sincronização ──
+
+  function syncWithServer(remoteUrl, options = {}) {
+    return PouchInit.sync(remoteUrl, options);
+  }
+
+  function stopSync() {
+    PouchInit.stopSync();
+  }
+
+  function getSyncStatus() {
+    return PouchInit.getSyncStatus();
+  }
+
+  // ── Backup ──
+
+  function backup() {
+    return PouchInit.backup();
+  }
+
+  function restore(jsonData) {
+    return PouchInit.restore(jsonData);
+  }
+
+  // ── API Pública ──
+  return {
+    init,
+    getCurrentUser,
+    setCurrentUser,
+    loadSession,
+    loadUserFromSession,
+    registerUser,
+    loginUser,
+    recoverAccount,
+    updateUser,
+    deleteUser,
+    getCharacters,
+    getCharacter,
+    saveCharacter,
+    deleteCharacter,
+    getSystems,
+    saveSystem,
+    deleteSystem,
+    syncWithServer,
+    stopSync,
+    getSyncStatus,
+    backup,
+    restore
+  };
+})();
+
+// Exporta globalmente
+window.StorageAdapter = StorageAdapter;
+
+console.log('✅ StorageAdapter carregado!');
