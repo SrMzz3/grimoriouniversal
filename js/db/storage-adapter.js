@@ -1,19 +1,19 @@
-/* js/db/storage-adapter.js — VERSÃO ULTRA-FINAL (100% autônoma) */
+/* js/db/storage-adapter.js — VERSÃO QUE CRIA O PouchInit IMEDIATAMENTE */
 
 // ================================================================
-// PASSO 1: GARANTE QUE PouchInit EXISTE (mesmo sem pouch-init.js)
+// CRIA O PouchInit NA HORA — ANTES DE TUDO
 // ================================================================
 
 (function() {
-  // Se PouchInit já existe, não faz nada
+  // Já existe? Se sim, não faz nada
   if (typeof window.PouchInit !== 'undefined') {
     console.log('✅ PouchInit já existe');
     return;
   }
 
-  console.warn('⚠️ PouchInit não encontrado! Criando fallback...');
+  console.warn('⚠️ PouchInit não encontrado! Criando fallback IMEDIATO...');
 
-  // Se PouchDB não existe, cria um falso
+  // Se PouchDB não existe, cria um falso com localStorage
   if (typeof window.PouchDB === 'undefined') {
     console.warn('⚠️ PouchDB não encontrado! Criando fallback localStorage...');
     
@@ -60,7 +60,7 @@
     };
   }
 
-  // Cria o PouchInit
+  // CRIA O PouchInit AGORA MESMO
   window.PouchInit = {
     _db: null,
     
@@ -158,7 +158,7 @@
 })();
 
 // ================================================================
-// PASSO 2: STORAGE ADAPTER — USA PouchInit (real ou falso)
+// STORAGE ADAPTER
 // ================================================================
 
 const StorageAdapter = (() => {
@@ -168,10 +168,10 @@ const StorageAdapter = (() => {
   function init() {
     if (initialized) return Promise.resolve();
     
-    // Garante que o PouchInit existe
+    // Só pra garantir que o PouchInit existe (já deve ter sido criado acima)
     if (typeof PouchInit === 'undefined') {
-      console.error('❌ PouchInit ainda não definido!');
-      // Recria na hora
+      console.error('❌ PouchInit não definido! Criando emergência...');
+      // Recria na hora se por algum motivo não existir
       window.PouchInit = {
         _db: null,
         init: function(dbName) {
@@ -181,10 +181,6 @@ const StorageAdapter = (() => {
         get: function(id) {
           if (!this._db) this.init();
           return this._db.get(id);
-        },
-        put: function(doc) {
-          if (!this._db) this.init();
-          return this._db.put(doc);
         },
         save: function(doc) {
           if (!this._db) this.init();
@@ -275,7 +271,10 @@ const StorageAdapter = (() => {
     });
   }
 
-  // ── USUÁRIOS ──
+  // ================================================================
+  // USUÁRIOS
+  // ================================================================
+
   function getCurrentUser() { return currentUser; }
 
   function setCurrentUser(user) {
@@ -311,6 +310,12 @@ const StorageAdapter = (() => {
   }
 
   function registerUser(username, password) {
+    // GARANTE que o PouchInit existe antes de usar
+    if (typeof PouchInit === 'undefined') {
+      console.error('❌ PouchInit não definido em registerUser!');
+      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
+    }
+
     return PouchInit.query('users/by_username', { key: username })
       .then(result => {
         if (result.rows.length > 0) throw new Error('Usuário já existe');
@@ -332,6 +337,12 @@ const StorageAdapter = (() => {
   }
 
   function loginUser(username, password) {
+    // GARANTE que o PouchInit existe antes de usar
+    if (typeof PouchInit === 'undefined') {
+      console.error('❌ PouchInit não definido em loginUser!');
+      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
+    }
+
     return PouchInit.query('users/by_username', { key: username })
       .then(result => {
         if (result.rows.length === 0) throw new Error('Usuário não encontrado');
@@ -344,6 +355,10 @@ const StorageAdapter = (() => {
   }
 
   function recoverAccount(username, keyword, newPassword) {
+    if (typeof PouchInit === 'undefined') {
+      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
+    }
+
     return PouchInit.query('users/by_username', { key: username })
       .then(result => {
         if (result.rows.length === 0) throw new Error('Usuário não encontrado');
@@ -356,31 +371,50 @@ const StorageAdapter = (() => {
   }
 
   function updateUser(userData) {
+    if (typeof PouchInit === 'undefined') {
+      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
+    }
+
     return PouchInit.get('user_' + userData.id)
       .then(doc => { Object.assign(doc, userData); return PouchInit.save(doc); })
       .then(result => { currentUser = result; return result; });
   }
 
   function deleteUser(userId) {
+    if (typeof PouchInit === 'undefined') {
+      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
+    }
+
     return PouchInit.remove('user_' + userId)
       .then(() => PouchInit.query('characters/by_userId', { key: userId, include_docs: true }))
       .then(result => Promise.all(result.rows.map(row => PouchInit.remove(row.doc._id))))
       .then(() => { currentUser = null; localStorage.removeItem('grimorio_session'); return { message: 'Usuário excluído' }; });
   }
 
-  // ── PERSONAGENS ──
+  // ================================================================
+  // PERSONAGENS
+  // ================================================================
+
   function getCharacters() {
     if (!currentUser) return Promise.resolve([]);
+    if (typeof PouchInit === 'undefined') return Promise.resolve([]);
+    
     return PouchInit.query('characters/by_userId', { key: currentUser.id, include_docs: true })
       .then(result => result.rows.map(row => row.doc));
   }
 
   function getCharacter(charId) {
+    if (typeof PouchInit === 'undefined') {
+      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
+    }
     return PouchInit.get('char_' + charId);
   }
 
   function saveCharacter(charData) {
     if (!currentUser) return Promise.reject('Nenhum usuário logado');
+    if (typeof PouchInit === 'undefined') {
+      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
+    }
     
     const doc = {
       _id: charData._id || (charData.id ? 'char_' + charData.id : 'char_' + crypto.randomUUID()),
@@ -399,7 +433,6 @@ const StorageAdapter = (() => {
       skillExtraBonuses: charData.skillExtraBonuses || {},
       createdAt: charData.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
-      // D&D
       level: charData.level || 1,
       cls: charData.cls || '',
       clsId: charData.clsId || '',
@@ -412,7 +445,6 @@ const StorageAdapter = (() => {
       slots: charData.slots || {},
       skillProfs: charData.skillProfs || {},
       skillExpertise: charData.skillExpertise || {},
-      // OP
       age: charData.age || '',
       origin: charData.origin || '',
       originId: charData.originId || '',
@@ -423,7 +455,6 @@ const StorageAdapter = (() => {
       nexLevel: charData.nexLevel ?? 0,
       nexPercent: charData.nexPercent ?? 0,
       trilhas: charData.trilhas || { Sobrevivência: 0, Habilidades: 0, Poderes: 0, Rituais: 0 },
-      // Custom
       customSysName: charData.customSysName || 'Sistema Próprio',
       customStatKeys: charData.customStatKeys || [],
       customStatLabels: charData.customStatLabels || {},
@@ -448,6 +479,10 @@ const StorageAdapter = (() => {
 
   function deleteCharacter(charId) {
     if (!currentUser) return Promise.reject('Nenhum usuário logado');
+    if (typeof PouchInit === 'undefined') {
+      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
+    }
+
     return PouchInit.remove('char_' + charId)
       .then(() => PouchInit.get('user_' + currentUser.id))
       .then(user => {
@@ -459,14 +494,22 @@ const StorageAdapter = (() => {
       });
   }
 
-  // ── SISTEMAS ──
+  // ================================================================
+  // SISTEMAS
+  // ================================================================
+
   function getSystems() {
     if (!currentUser) return Promise.resolve([]);
+    if (typeof PouchInit === 'undefined') return Promise.resolve([]);
     return PouchInit.get('user_' + currentUser.id).then(user => user.systems || []).catch(() => []);
   }
 
   function saveSystem(sysData) {
     if (!currentUser) return Promise.reject('Nenhum usuário logado');
+    if (typeof PouchInit === 'undefined') {
+      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
+    }
+
     return PouchInit.get('user_' + currentUser.id)
       .then(user => {
         if (!user.systems) user.systems = [];
@@ -481,6 +524,10 @@ const StorageAdapter = (() => {
 
   function deleteSystem(sysId) {
     if (!currentUser) return Promise.reject('Nenhum usuário logado');
+    if (typeof PouchInit === 'undefined') {
+      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
+    }
+
     return PouchInit.get('user_' + currentUser.id)
       .then(user => {
         if (user.systems) {
@@ -491,16 +538,44 @@ const StorageAdapter = (() => {
       });
   }
 
-  // ── SINCRONIZAÇÃO ──
-  function syncWithServer(remoteUrl, options = {}) { return PouchInit.sync(remoteUrl, options); }
-  function stopSync() { PouchInit.stopSync(); }
-  function getSyncStatus() { return PouchInit.getSyncStatus(); }
+  // ================================================================
+  // SINCRONIZAÇÃO E BACKUP
+  // ================================================================
 
-  // ── BACKUP ──
-  function backup() { return PouchInit.backup(); }
-  function restore(jsonData) { return PouchInit.restore(jsonData); }
+  function syncWithServer(remoteUrl, options = {}) {
+    if (typeof PouchInit === 'undefined') {
+      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
+    }
+    return PouchInit.sync(remoteUrl, options);
+  }
 
-  // ── API ──
+  function stopSync() {
+    if (typeof PouchInit !== 'undefined') PouchInit.stopSync();
+  }
+
+  function getSyncStatus() {
+    if (typeof PouchInit === 'undefined') return { isSyncing: false, remoteUrl: null };
+    return PouchInit.getSyncStatus();
+  }
+
+  function backup() {
+    if (typeof PouchInit === 'undefined') {
+      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
+    }
+    return PouchInit.backup();
+  }
+
+  function restore(jsonData) {
+    if (typeof PouchInit === 'undefined') {
+      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
+    }
+    return PouchInit.restore(jsonData);
+  }
+
+  // ================================================================
+  // API PÚBLICA
+  // ================================================================
+
   return {
     init,
     getCurrentUser,
@@ -529,4 +604,4 @@ const StorageAdapter = (() => {
 
 // Exporta globalmente
 window.StorageAdapter = StorageAdapter;
-console.log('✅ StorageAdapter carregado!');
+console.log('✅ StorageAdapter carregado com fallback!');

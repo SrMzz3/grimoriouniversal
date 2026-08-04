@@ -379,4 +379,11 @@ const TableUI = (() => {
 
 })();
 
-window.TableUI = TableUI;
+window.TableUI = {
+  renderTableManager: TableUI.renderTableManager,
+  renderTableScreen: TableUI.renderTableScreen,
+  openTable: TableUI.openTable,
+  checkTableLink: TableUI.checkTableLink,
+  TableSystem: TableUI.TableSystem
+};
+
