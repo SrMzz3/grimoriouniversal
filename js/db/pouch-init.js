@@ -2,28 +2,39 @@
 
 // ================================================================
 // PouchInit — Camada de acesso ao PouchDB
-// Define as views (design docs) para as queries usadas pelo sistema
 // ================================================================
 
 window.PouchInit = (() => {
   let _db = null;
 
-  // Detecta se o PouchDB é o real (da CDN) ou o fallback falso (do index.html)
-  // O PouchDB real tem bulkDocs no prototype; o falso não tem.
+  // ================================================================
+  // DETECÇÃO DO POUCHDB REAL
+  // ================================================================
+
   function isRealPouchDB() {
-    return typeof window.PouchDB !== 'undefined' &&
-      window.PouchDB.prototype &&
-      typeof window.PouchDB.prototype.bulkDocs === 'function';
+    if (typeof window.PouchDB === 'undefined') return false;
+
+    // PouchDB real tem bulkDocs
+    if (typeof window.PouchDB.prototype.bulkDocs === 'function') return true;
+
+    // PouchDB real tem query
+    if (typeof window.PouchDB.prototype.query === 'function') return true;
+
+    return false;
   }
 
   const USE_REAL_POUCHDB = isRealPouchDB();
+
   if (!USE_REAL_POUCHDB) {
     console.warn('⚠️ PouchDB real não detectado. Usando modo manual para queries.');
   } else {
     console.log('✅ PouchDB real detectado. Views serão configuradas.');
   }
 
-  // Design docs com as views utilizadas pelo StorageAdapter
+  // ================================================================
+  // DESIGN DOCS (VIEWS)
+  // ================================================================
+
   const DESIGN_DOCS = [
     {
       _id: '_design/users',
@@ -46,21 +57,68 @@ window.PouchInit = (() => {
               emit(doc.userId, null);
             }
           }.toString()
+        },
+        by_tableId: {
+          map: function(doc) {
+            if (doc.tableId) {
+              emit(doc.tableId, null);
+            }
+          }.toString()
+        }
+      }
+    },
+    {
+      _id: '_design/rolls',
+      views: {
+        by_tableId: {
+          map: function(doc) {
+            if (doc.type === 'roll' && doc.tableId) {
+              emit(doc.tableId, null);
+            }
+          }.toString()
+        },
+        by_timestamp: {
+          map: function(doc) {
+            if (doc.type === 'roll' && doc.timestamp) {
+              emit(doc.timestamp, null);
+            }
+          }.toString()
+        }
+      }
+    },
+    {
+      _id: '_design/messages',
+      views: {
+        by_tableId: {
+          map: function(doc) {
+            if (doc.type === 'message' && doc.tableId) {
+              emit(doc.tableId, null);
+            }
+          }.toString()
+        },
+        by_timestamp: {
+          map: function(doc) {
+            if (doc.type === 'message' && doc.timestamp) {
+              emit(doc.timestamp, null);
+            }
+          }.toString()
         }
       }
     }
   ];
 
+  // ================================================================
+  // CRIA AS VIEWS
+  // ================================================================
+
   function ensureViews(db) {
     var promises = DESIGN_DOCS.map(function(ddoc) {
       return db.get(ddoc._id)
         .then(function(existing) {
-          // Se o design doc já existe, preserva o _rev
           ddoc._rev = existing._rev;
           return db.put(ddoc);
         })
         .catch(function(err) {
-          // Se não existe (404), cria
           if (err.status === 404) {
             return db.put(ddoc);
           }
@@ -70,6 +128,57 @@ window.PouchInit = (() => {
     return Promise.all(promises);
   }
 
+  // ================================================================
+  // GERAR ID
+  // ================================================================
+
+  function generateId() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+      return crypto.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      var r = Math.random() * 16 | 0;
+      var v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+  }
+
+  // ================================================================
+  // QUERY MANUAL (FALLBACK)
+  // ================================================================
+
+  function manualQuery(view, options) {
+    var key = options && options.key ? options.key : null;
+
+    return _db.allDocs({ include_docs: true })
+      .then(function(result) {
+        var docs = result.rows.map(function(row) { return row.doc; });
+
+        // Filtra por tipo de acordo com a view
+        if (view === 'users/by_username') {
+          docs = docs.filter(function(doc) { return doc.type === 'user'; });
+          if (key) {
+            docs = docs.filter(function(doc) { return doc.username === key; });
+          }
+        } else if (view === 'characters/by_userId') {
+          docs = docs.filter(function(doc) { return doc.type === 'character' || doc.type === 'shared_character'; });
+          if (key) {
+            docs = docs.filter(function(doc) { return doc.userId === key; });
+          }
+        } else if (view === 'characters/by_tableId' || view === 'rolls/by_tableId' || view === 'messages/by_tableId') {
+          if (key) {
+            docs = docs.filter(function(doc) { return doc.tableId === key; });
+          }
+        }
+
+        return { rows: docs.map(function(doc) { return { doc: doc }; }) };
+      });
+  }
+
+  // ================================================================
+  // FUNÇÕES PRINCIPAIS
+  // ================================================================
+
   function init(dbName) {
     if (_db) return Promise.resolve(_db);
 
@@ -78,21 +187,23 @@ window.PouchInit = (() => {
 
     _db = new PouchDB(name);
 
-    // Cria as views se ainda não existirem
-    return ensureViews(_db)
-      .then(function() {
-        console.log('✅ PouchInit: views configuradas!');
-        return _db;
-      })
-      .catch(function(err) {
-        console.warn('⚠️ PouchInit: erro ao configurar views:', err.message || err);
-        return _db;
-      });
+    if (USE_REAL_POUCHDB) {
+      return ensureViews(_db)
+        .then(function() {
+          console.log('✅ PouchInit: views configuradas!');
+          return _db;
+        })
+        .catch(function(err) {
+          console.warn('⚠️ PouchInit: erro ao configurar views:', err.message || err);
+          return _db;
+        });
+    } else {
+      console.log('📦 PouchInit: usando modo manual (sem views)');
+      return Promise.resolve(_db);
+    }
   }
 
-  function getDb() {
-    return _db;
-  }
+  function getDb() { return _db; }
 
   function save(doc) {
     if (!_db) return init().then(function() { return _db.put(doc); });
@@ -125,49 +236,25 @@ window.PouchInit = (() => {
       .then(function(doc) { return _db.remove(doc); });
   }
 
-function query(view, options) {
+  function query(view, options) {
     options = options || {};
 
-    // Se não estiver usando o PouchDB real, faz a busca manual direto
     if (!USE_REAL_POUCHDB) {
-      if (!_db) return init().then(function() { return manualQuery(view, options, null); });
-      return manualQuery(view, options, null);
+      if (!_db) return init().then(function() { return manualQuery(view, options); });
+      return manualQuery(view, options);
     }
 
     if (!_db) return init()
       .then(function() { return _db.query(view, options); })
-      .catch(function(err) { return manualQuery(view, options, err); });
+      .catch(function(err) {
+        if (err.status === 404) return manualQuery(view, options);
+        throw err;
+      });
     return _db.query(view, options)
-      .catch(function(err) { return manualQuery(view, options, err); });
-  }
-
-// Fallback manual quando a view não existe (404) — busca em allDocs
-  function manualQuery(view, options, err) {
-    // Sempre executa (quando err é null, vem do modo manual sem PouchDB real)
-    if (err === null || err.status === 404) {
-      if (err) {
-        console.warn('⚠️ View "' + view + '" não encontrada. Buscando manualmente...');
-      }
-      return _db.allDocs({ include_docs: true })
-        .then(function(result) {
-          var docs = result.rows.map(function(row) { return row.doc; });
-
-          if (view === 'users/by_username' && options.key) {
-            docs = docs.filter(function(doc) {
-              return doc.username === options.key;
-            });
-          }
-
-          if (view === 'characters/by_userId' && options.key) {
-            docs = docs.filter(function(doc) {
-              return doc.userId === options.key;
-            });
-          }
-
-          return { rows: docs.map(function(doc) { return { doc: doc }; }) };
-        });
-    }
-    throw err;
+      .catch(function(err) {
+        if (err.status === 404) return manualQuery(view, options);
+        throw err;
+      });
   }
 
   function sync(remoteUrl, options) {
@@ -213,8 +300,8 @@ function query(view, options) {
   }
 
   function restore(jsonData) {
-    if (!_db) return init().then(function() { return _db.bulkDocs(docs); });
     var docs = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
+    if (!_db) return init().then(function() { return _db.bulkDocs(docs); });
     return _db.bulkDocs(docs);
   }
 
@@ -226,6 +313,10 @@ function query(view, options) {
     }
     return Promise.resolve({ ok: true });
   }
+
+  // ================================================================
+  // API PÚBLICA
+  // ================================================================
 
   return {
     init: init,
@@ -240,8 +331,10 @@ function query(view, options) {
     getSyncStatus: getSyncStatus,
     backup: backup,
     restore: restore,
-    destroy: destroy
+    destroy: destroy,
+    generateId: generateId
   };
+
 })();
 
 console.log('✅ PouchInit real carregado!');

@@ -9,7 +9,7 @@ const TableSystem = (() => {
   // ── Criar Mesa (com Mestre) ──
   function createTable(name) {
     return new Promise((resolve, reject) => {
-      const tableId = 'mesa_' + crypto.randomUUID().slice(0, 8);
+const tableId = 'mesa_' + PouchInit.generateId().slice(0, 8);
       const remoteUrl = CONFIG.SERVER_URL + tableId;
       const user = StorageAdapter.getCurrentUser();
       
@@ -478,9 +478,9 @@ const TableSystem = (() => {
         reject('Nenhum usuário logado');
         return;
       }
-      const doc = {
-        _id: 'message_' + crypto.randomUUID(),
-        id: crypto.randomUUID(),
+const doc = {
+        _id: 'message_' + PouchInit.generateId(),
+        id: PouchInit.generateId(),
         type: 'message',
         tableId: tableId,
         userId: user.id,
@@ -502,9 +502,9 @@ const TableSystem = (() => {
         reject('Nenhum usuário logado');
         return;
       }
-      const doc = {
-        _id: 'roll_' + crypto.randomUUID(),
-        id: crypto.randomUUID(),
+const doc = {
+        _id: 'roll_' + PouchInit.generateId(),
+        id: PouchInit.generateId(),
         type: 'roll',
         tableId: tableId,
         userId: user.id,

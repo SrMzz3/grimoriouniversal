@@ -111,9 +111,33 @@
           if (!this._db) this.init('fallback');
           return this._db.get(id).then(doc => this._db.remove(doc));
         },
-        query: function(view, options) {
+query: function(view, options) {
           if (!this._db) this.init('fallback');
-          return this._db.query(view, options);
+          options = options || {};
+          // FALLBACK: busca manual no localStorage
+          return this._db.allDocs({ include_docs: true })
+            .then(function(result) {
+              var docs = result.rows.map(function(row) { return row.doc; });
+              var key = options.key;
+              if (view === 'users/by_username') {
+                docs = docs.filter(function(doc) { return doc.type === 'user'; });
+                if (key) docs = docs.filter(function(doc) { return doc.username === key; });
+              } else if (view === 'characters/by_userId') {
+                docs = docs.filter(function(doc) { return doc.type === 'character' || doc.type === 'shared_character'; });
+                if (key) docs = docs.filter(function(doc) { return doc.userId === key; });
+              } else if (view === 'characters/by_tableId' || view === 'rolls/by_tableId' || view === 'messages/by_tableId') {
+                if (key) docs = docs.filter(function(doc) { return doc.tableId === key; });
+              }
+              return { rows: docs.map(function(doc) { return { doc: doc }; }) };
+            });
+        },
+        generateId: function() {
+          if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+          return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            var r = Math.random() * 16 | 0;
+            var v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+          });
         },
         sync: function() { return { on: function() {}, cancel: function() {} }; },
         stopSync: function() {},

@@ -26,6 +26,10 @@ Criar o arquivo `js/db/pouch-init.js` real (substituir o fallback interno) e ade
   - [x] `pouch-init.js`
   - [x] `storage-adapter.js`
   - [x] `table.js`
+  - [x] `login.js`
+  - [x] `app.js`
+- [x] **Substituir `crypto.randomUUID()` por `PouchInit.generateId()`** no `storage-adapter.js` (migração, registerUser, saveCharacter) para compatibilidade com navegadores que não suportam a API nativa.
+- [x] **Melhorar `recoverAccount`** no `storage-adapter.js`: agora lê a palavra-chave também do `localStorage` (caso tenha sido salva via `profile.js`/`GrimorioStorage`) e sincroniza a nova senha de volta ao `localStorage`.
 
 ## Correção do bug "Nenhum usuário logado" (perfil)
 
