@@ -106,15 +106,37 @@ if (typeof window.PouchInit === 'undefined') {
     
     query: function(view, options) {
       if (!this._db) this.init('grimorio_db');
-      // Fallback para query se o índice não existir
+
+      // Tenta executar a query normal
       return this._db.query(view, options).catch(function(err) {
-        console.warn('⚠️ Query fallback para', view, err);
-        // Se o índice não existir, retorna vazio
+        // Se a view não existe (404), faz a busca manual no localStorage
         if (err.status === 404) {
-          return { rows: [] };
+          console.warn('⚠️ View "' + view + '" não encontrada. Buscando manualmente...');
+
+          return this._db.allDocs({ include_docs: true })
+            .then(function(result) {
+              var docs = result.rows
+                .map(function(row) { return row.doc; });
+
+              // Se a query for por username, filtra
+              if (view === 'users/by_username' && options && options.key) {
+                docs = docs.filter(function(doc) {
+                  return doc.username === options.key;
+                });
+              }
+
+              // Se a query for por userId, filtra
+              if (view === 'characters/by_userId' && options && options.key) {
+                docs = docs.filter(function(doc) {
+                  return doc.userId === options.key;
+                });
+              }
+
+              return { rows: docs.map(function(doc) { return { doc: doc }; }) };
+            }.bind(this));
         }
         throw err;
-      });
+      }.bind(this));
     },
     
     sync: function(remoteUrl, options) {
