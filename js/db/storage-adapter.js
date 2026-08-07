@@ -105,6 +105,20 @@ var doc = {
 
   function getCurrentUser() { return currentUser; }
 
+  // ================================================================
+  // AUTH VIA LOCALSTORAGE — ROBUSTO, FUNCIONA MESMO OFFLINE
+  // O GrimorioStorage (perfil/select) já lê de 'grimorio_users',
+  // então mantemos aqui a mesma fonte de verdade para o login.
+  // ================================================================
+  function getUsersLocal() {
+    try { return JSON.parse(localStorage.getItem('grimorio_users') || '[]'); }
+    catch (e) { return []; }
+  }
+
+  function saveUsersLocal(users) {
+    localStorage.setItem('grimorio_users', JSON.stringify(users));
+  }
+
   // Espelha o usuário (do PouchDB) no localStorage 'grimorio_users', pois
   // o profile.js e o select.js leem de lá (via GrimorioStorage).
   function syncUserToLocalStorage(user) {
@@ -151,9 +165,16 @@ var doc = {
     catch { return null; }
   }
 
-  function loadUserFromSession() {
+function loadUserFromSession() {
     var session = loadSession();
     if (!session) return Promise.resolve(null);
+    var users = getUsersLocal();
+    var user = users.find(function(u) { return u.id === session.id; });
+    if (user) {
+      currentUser = user;
+      return Promise.resolve(user);
+    }
+    // Fallback para o PouchDB (caso exista)
     return PouchInit.get('user_' + session.id)
       .then(function(doc) {
         currentUser = doc;
@@ -164,119 +185,106 @@ var doc = {
   }
 
   function registerUser(username, password) {
-    return PouchInit.query('users/by_username', { key: username })
-      .then(function(result) {
-        if (result.rows.length > 0) throw new Error('Usuário já existe');
-var user = {
-          _id: 'user_' + PouchInit.generateId(),
-          id: PouchInit.generateId(),
-          username: username,
-          password: password,
-          displayName: username,
-          avatar: '',
-          frame: 'none',
-          background: '',
-          bgBrightness: 25,
-          bio: '',
-          recoveryKeyword: '',
-          characters: [],
-          systems: [],
-          type: 'user',
-          createdAt: new Date().toISOString()
-        };
-        return PouchInit.save(user);
-      })
-      .then(function(result) { return PouchInit.get(result._id); });
+    return new Promise(function(resolve, reject) {
+      var users = getUsersLocal();
+      var exists = users.some(function(u) { return u.username === username; });
+      if (exists) {
+        reject(new Error('Usuário já existe'));
+        return;
+      }
+      var id = PouchInit.generateId();
+      var user = {
+        _id: 'user_' + id,
+        id: id,
+        username: username,
+        password: password,
+        displayName: username,
+        avatar: '',
+        frame: 'none',
+        background: '',
+        bgBrightness: 25,
+        bio: '',
+        recoveryKeyword: '',
+        characters: [],
+        systems: [],
+        type: 'user',
+        createdAt: new Date().toISOString()
+      };
+      users.push(user);
+      saveUsersLocal(users);
+      // Também tenta salvar no PouchDB (se disponível), mas não bloqueia o registro
+      try { PouchInit.save(user).catch(function() {}); } catch (e) {}
+      resolve(user);
+    });
   }
 
   function loginUser(username, password) {
-    return PouchInit.query('users/by_username', { key: username })
-      .then(function(result) {
-        if (result.rows.length === 0) throw new Error('Usuário não encontrado');
-        var user = result.rows[0].doc;
-        if (user.password !== password) throw new Error('Senha incorreta');
-        currentUser = user;
-        setCurrentUser(user);
-        return user;
-      });
+    return new Promise(function(resolve, reject) {
+      var users = getUsersLocal();
+      var user = users.find(function(u) { return u.username === username; });
+      if (!user) {
+        reject(new Error('Usuário não encontrado'));
+        return;
+      }
+      if (user.password !== password) {
+        reject(new Error('Senha incorreta'));
+        return;
+      }
+      currentUser = user;
+      setCurrentUser(user);
+      resolve(user);
+    });
   }
 
 function recoverAccount(username, keyword, newPassword) {
-    return PouchInit.query('users/by_username', { key: username })
-      .then(function(result) {
-        if (result.rows.length === 0) throw new Error('Usuário não encontrado');
-        var user = result.rows[0].doc;
-
-        // A palavra-chave pode ter sido salva apenas no localStorage (via profile.js),
-        // que usa GrimorioStorage.updateCurrentUser (só grava no localStorage).
-        // Por isso, verificamos também no localStorage antes de concluir que está incorreta.
-        var storedKeyword = user.recoveryKeyword;
-        if (!storedKeyword) {
-          try {
-            var users = JSON.parse(localStorage.getItem('grimorio_users') || '[]');
-            var localUser = users.find(function(u) { return u.id === user.id; });
-            if (localUser && localUser.recoveryKeyword) {
-              storedKeyword = localUser.recoveryKeyword;
-            }
-          } catch (e) {}
-        }
-
-        if (!storedKeyword || storedKeyword !== keyword) {
-          throw new Error('Palavra-chave incorreta');
-        }
-
-user.password = newPassword;
-        user.recoveryKeyword = storedKeyword;
-        return PouchInit.save(user);
-      })
-      .then(function(result) {
-        // Sincroniza a nova senha também no localStorage para manter consistência
-        try {
-          var users = JSON.parse(localStorage.getItem('grimorio_users') || '[]');
-          var idx = users.findIndex(function(u) { return u.username === username; });
-          if (idx >= 0) {
-            users[idx].password = newPassword;
-            users[idx].recoveryKeyword = keyword;
-            localStorage.setItem('grimorio_users', JSON.stringify(users));
-          }
-        } catch (e) {}
-        return { message: 'Senha alterada com sucesso' };
-      });
+    return new Promise(function(resolve, reject) {
+      var users = getUsersLocal();
+      var idx = users.findIndex(function(u) { return u.username === username; });
+      if (idx === -1) {
+        reject(new Error('Usuário não encontrado'));
+        return;
+      }
+      var user = users[idx];
+      if (!user.recoveryKeyword || user.recoveryKeyword !== keyword) {
+        reject(new Error('Palavra-chave incorreta'));
+        return;
+      }
+      user.password = newPassword;
+      saveUsersLocal(users);
+      try { PouchInit.save(user).catch(function() {}); } catch (e) {}
+      resolve({ message: 'Senha alterada com sucesso' });
+    });
   }
 
 function updateUser(userData) {
-    return PouchInit.get('user_' + userData.id)
-      .then(function(doc) { 
-        Object.assign(doc, userData); 
-        return PouchInit.save(doc); 
-      })
-      .then(function(result) { 
-        currentUser = result; 
-        syncUserToLocalStorage(result);
-        return result; 
-      });
+    return new Promise(function(resolve, reject) {
+      var users = getUsersLocal();
+      var idx = users.findIndex(function(u) { return u.id === userData.id; });
+      if (idx === -1) {
+        reject(new Error('Usuário não encontrado'));
+        return;
+      }
+      var merged = Object.assign({}, users[idx], userData);
+      delete merged._id;
+      delete merged._rev;
+      users[idx] = merged;
+      saveUsersLocal(users);
+      currentUser = merged;
+      try { PouchInit.save(merged).catch(function() {}); } catch (e) {}
+      resolve(merged);
+    });
   }
 
   function deleteUser(userId) {
-    return PouchInit.remove('user_' + userId)
-      .then(function() {
-        return PouchInit.query('characters/by_userId', { key: userId, include_docs: true });
-      })
-      .then(function(result) {
-        var promises = result.rows.map(function(row) { return PouchInit.remove(row.doc._id); });
-        return Promise.all(promises);
-      })
-      .then(function() {
-        currentUser = null;
-        localStorage.removeItem('grimorio_session');
-        // Remove também do localStorage 'grimorio_users'
-        try {
-          var users = JSON.parse(localStorage.getItem('grimorio_users') || '[]');
-          users = users.filter(function(u) { return u.id !== userId; });
-          localStorage.setItem('grimorio_users', JSON.stringify(users));
-        } catch (e) {}
-        return { message: 'Usuário excluído' };
-      });
+    return new Promise(function(resolve) {
+      var users = getUsersLocal();
+      users = users.filter(function(u) { return u.id !== userId; });
+      saveUsersLocal(users);
+      currentUser = null;
+      localStorage.removeItem('grimorio_session');
+      try { PouchInit.remove('user_' + userId).catch(function() {}); } catch (e) {}
+      resolve({ message: 'Usuário excluído' });
+    });
   }
 
 // ================================================================

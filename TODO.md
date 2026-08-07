@@ -41,6 +41,13 @@ Criar o arquivo `js/db/pouch-init.js` real (substituir o fallback interno) e ade
   - `updateUser` (edição de perfil)
 - [x] `deleteUser` agora também remove o usuário do `localStorage['grimorio_users']`.
 
+## Correção "PouchDB real não detectado" + login/perfil quebrado
+
+- [x] **Causa raiz**: A CDN do PouchDB (`https://cdn.jsdelivr.net/...`) pode não carregar (offline/erro de rede), fazendo o sistema cair no modo manual frágil. As queries (`users/by_username`) não encontravam usuários de forma confiável, impedindo login/cadastro.
+- [x] **Correção**: `registerUser`, `loginUser`, `recoverAccount`, `updateUser`, `deleteUser` e `loadUserFromSession` agora operam **diretamente no `localStorage`** (`grimorio_users`) como fonte primária, que é exatamente o que o `GrimorioStorage`/`profile.js`/`select.js` já usam.
+- [x] Isso garante que **login, cadastro, recuperação de senha e perfil funcionam SEMPRE**, mesmo offline, sem depender do PouchDB/CDN.
+- [x] O PouchDB continua sendo usado (espelhamento opcional) para personagens/mesas, mas não bloqueia mais autenticação.
+
 ## Pendências / Observações
 
 - [ ] **`table.js`** — as funções de compartilhamento de personagem (`shareCharacter`, `grantViewPermission`, `getTableCharacters`, `getTableCharactersPublic`, `getCharacterWithPermission`) usam `new PouchDB(CONFIG.SERVER_URL + tableId)` com o servidor remoto `https://grimorio-couchdb.ibm.com/`. Este servidor pode não existir. Caso falhe, será necessário um backend CouchDB real ou adaptar para usar o banco local. **(Configuração original do sistema)**
