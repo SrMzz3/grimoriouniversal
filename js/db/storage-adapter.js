@@ -105,6 +105,27 @@ const StorageAdapter = (() => {
 
   function getCurrentUser() { return currentUser; }
 
+  // Espelha o usuário (do PouchDB) no localStorage 'grimorio_users', pois
+  // o profile.js e o select.js leem de lá (via GrimorioStorage).
+  function syncUserToLocalStorage(user) {
+    if (!user) return;
+    try {
+      var users = JSON.parse(localStorage.getItem('grimorio_users') || '[]');
+      var idx = users.findIndex(function(u) { return u.id === user.id; });
+      var plain = Object.assign({}, user);
+      delete plain._id;
+      delete plain._rev;
+      if (idx >= 0) {
+        users[idx] = plain;
+      } else {
+        users.push(plain);
+      }
+      localStorage.setItem('grimorio_users', JSON.stringify(users));
+    } catch (e) {
+      console.warn('⚠️ [syncUserToLocalStorage] Erro:', e);
+    }
+  }
+
   function setCurrentUser(user) {
     currentUser = user;
     if (user) {
@@ -116,6 +137,7 @@ const StorageAdapter = (() => {
         updatedAt: new Date().toISOString()
       };
       PouchInit.save(doc);
+      syncUserToLocalStorage(user);
       localStorage.setItem('grimorio_session', JSON.stringify({ id: user.id, username: user.username }));
     } else {
       localStorage.removeItem('grimorio_session');
@@ -133,7 +155,11 @@ const StorageAdapter = (() => {
     var session = loadSession();
     if (!session) return Promise.resolve(null);
     return PouchInit.get('user_' + session.id)
-      .then(function(doc) { currentUser = doc; return doc; })
+      .then(function(doc) {
+        currentUser = doc;
+        syncUserToLocalStorage(doc);
+        return doc;
+      })
       .catch(function() { return null; });
   }
 
@@ -187,7 +213,7 @@ const StorageAdapter = (() => {
       .then(function() { return { message: 'Senha alterada com sucesso' }; });
   }
 
-  function updateUser(userData) {
+function updateUser(userData) {
     return PouchInit.get('user_' + userData.id)
       .then(function(doc) { 
         Object.assign(doc, userData); 
@@ -195,6 +221,7 @@ const StorageAdapter = (() => {
       })
       .then(function(result) { 
         currentUser = result; 
+        syncUserToLocalStorage(result);
         return result; 
       });
   }
@@ -211,6 +238,12 @@ const StorageAdapter = (() => {
       .then(function() {
         currentUser = null;
         localStorage.removeItem('grimorio_session');
+        // Remove também do localStorage 'grimorio_users'
+        try {
+          var users = JSON.parse(localStorage.getItem('grimorio_users') || '[]');
+          users = users.filter(function(u) { return u.id !== userId; });
+          localStorage.setItem('grimorio_users', JSON.stringify(users));
+        } catch (e) {}
         return { message: 'Usuário excluído' };
       });
   }

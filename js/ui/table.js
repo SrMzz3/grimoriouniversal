@@ -367,7 +367,7 @@ const TableSystem = (() => {
       });
   }
 
-  // ── Remover jogador da mesa ──
+// ── Remover jogador da mesa ──
   function removeFromTable(tableId, userId) {
     return StorageAdapter.get('table_' + tableId)
       .then(table => {
@@ -379,6 +379,168 @@ const TableSystem = (() => {
         table.members = table.members.filter(m => m.id !== userId);
         return StorageAdapter.save(table);
       });
+  }
+
+  // ── Listar mesas do usuário ──
+  function getUserTables() {
+    return new Promise((resolve) => {
+      const user = StorageAdapter.getCurrentUser();
+      if (!user) {
+        resolve([]);
+        return;
+      }
+      // Busca do banco local todos os docs do tipo 'table'
+      const db = PouchInit.getDb ? PouchInit.getDb() : null;
+      if (!db) {
+        resolve([]);
+        return;
+      }
+      db.allDocs({ include_docs: true })
+        .then(result => {
+          const tables = result.rows
+            .map(row => row.doc)
+            .filter(doc => doc.type === 'table' && doc.members && doc.members.some(m => m.id === user.id));
+          resolve(tables);
+        })
+        .catch(() => resolve([]));
+    });
+  }
+
+  // ── Sair da mesa ──
+  function leaveTable(tableId) {
+    return new Promise((resolve, reject) => {
+      const user = StorageAdapter.getCurrentUser();
+      if (!user) {
+        reject('Nenhum usuário logado');
+        return;
+      }
+      StorageAdapter.get('table_' + tableId)
+        .then(table => {
+          const master = table.members.find(m => m.role === 'master');
+          if (master && master.id === user.id) {
+            throw new Error('O mestre não pode sair da mesa. Transfira ou exclua a mesa.');
+          }
+          table.members = table.members.filter(m => m.id !== user.id);
+          return StorageAdapter.save(table);
+        })
+        .then(resolve)
+        .catch(err => reject(err.message || err));
+    });
+  }
+
+  // ── Buscar rolagens da mesa ──
+  function getTableRolls(tableId, limit) {
+    return new Promise((resolve) => {
+      const db = PouchInit.getDb ? PouchInit.getDb() : null;
+      if (!db) {
+        resolve([]);
+        return;
+      }
+      db.allDocs({ include_docs: true })
+        .then(result => {
+          const rolls = result.rows
+            .map(row => row.doc)
+            .filter(doc => doc.type === 'roll' && doc.tableId === tableId)
+            .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+            .slice(0, limit || 20);
+          resolve(rolls);
+        })
+        .catch(() => resolve([]));
+    });
+  }
+
+  // ── Buscar mensagens da mesa ──
+  function getTableMessages(tableId, limit) {
+    return new Promise((resolve) => {
+      const db = PouchInit.getDb ? PouchInit.getDb() : null;
+      if (!db) {
+        resolve([]);
+        return;
+      }
+      db.allDocs({ include_docs: true })
+        .then(result => {
+          const messages = result.rows
+            .map(row => row.doc)
+            .filter(doc => doc.type === 'message' && doc.tableId === tableId)
+            .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+            .slice(-(limit || 30));
+          resolve(messages);
+        })
+        .catch(() => resolve([]));
+    });
+  }
+
+  // ── Enviar mensagem na mesa ──
+  function sendMessage(tableId, msg) {
+    return new Promise((resolve, reject) => {
+      const user = StorageAdapter.getCurrentUser();
+      if (!user) {
+        reject('Nenhum usuário logado');
+        return;
+      }
+      const doc = {
+        _id: 'message_' + crypto.randomUUID(),
+        id: crypto.randomUUID(),
+        type: 'message',
+        tableId: tableId,
+        userId: user.id,
+        username: user.username,
+        message: msg,
+        timestamp: new Date().toISOString()
+      };
+      PouchInit.save(doc)
+        .then(() => resolve(doc))
+        .catch(err => reject(err.message || err));
+    });
+  }
+
+  // ── Registrar rolagem na mesa ──
+  function addTableRoll(tableId, roll) {
+    return new Promise((resolve, reject) => {
+      const user = StorageAdapter.getCurrentUser();
+      if (!user) {
+        reject('Nenhum usuário logado');
+        return;
+      }
+      const doc = {
+        _id: 'roll_' + crypto.randomUUID(),
+        id: crypto.randomUUID(),
+        type: 'roll',
+        tableId: tableId,
+        userId: user.id,
+        username: user.username,
+        label: roll.label || 'Rolagem',
+        total: roll.total != null ? roll.total : roll.result,
+        result: roll.total != null ? roll.total : roll.result,
+        timestamp: new Date().toISOString()
+      };
+      PouchInit.save(doc)
+        .then(() => resolve(doc))
+        .catch(err => reject(err.message || err));
+    });
+  }
+
+  // ── Watch em tempo real (polling simples) ──
+  function watchTable(tableId, callback) {
+    let lastCheck = new Date().toISOString();
+    const interval = setInterval(() => {
+      const db = PouchInit.getDb ? PouchInit.getDb() : null;
+      if (!db) return;
+      db.allDocs({ include_docs: true })
+        .then(result => {
+          result.rows.forEach(row => {
+            const doc = row.doc;
+            if (doc.tableId === tableId && doc.timestamp > lastCheck) {
+              lastCheck = doc.timestamp;
+              if (callback) callback(doc);
+            }
+          });
+        })
+        .catch(() => {});
+    }, 3000);
+    return {
+      cancel: () => clearInterval(interval)
+    };
   }
 
   // ── API Pública ──
@@ -394,6 +556,13 @@ const TableSystem = (() => {
     getCharacterWithPermission,
     promoteToMaster,
     removeFromTable,
+    getUserTables,
+    leaveTable,
+    getTableRolls,
+    getTableMessages,
+    sendMessage,
+    addTableRoll,
+    watchTable,
     CONFIG
   };
 
