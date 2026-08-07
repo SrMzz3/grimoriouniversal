@@ -1,193 +1,12 @@
-/* js/db/storage-adapter.js — VERSÃO SIMPLIFICADA (funciona SEMPRE) */
+/* js/db/storage-adapter.js — Usa o PouchInit real (js/db/pouch-init.js) */
 
 // ================================================================
-// CRIA O PouchInit IMEDIATAMENTE — CÓDIGO SOLTO, SEM IIFE
+// VERIFICAÇÃO DO POUCHINIT
 // ================================================================
 
-// Se PouchInit não existir, cria
+// Garante que o PouchInit real foi carregado de js/db/pouch-init.js
 if (typeof window.PouchInit === 'undefined') {
-  console.warn('⚠️ PouchInit não encontrado! Criando fallback...');
-  
-  // Se PouchDB não existe, cria um falso com localStorage
-  if (typeof window.PouchDB === 'undefined') {
-    console.warn('⚠️ PouchDB não encontrado! Criando fallback localStorage...');
-    
-    window.PouchDB = function(dbName) {
-      this._name = dbName || 'fallback';
-      this._prefix = 'pouch_' + this._name + '_';
-      return this;
-    };
-
-    window.PouchDB.prototype = {
-      put: function(doc) {
-        const key = this._prefix + doc._id;
-        localStorage.setItem(key, JSON.stringify(doc));
-        return Promise.resolve({ ok: true, id: doc._id, rev: '1-xxx' });
-      },
-      get: function(id) {
-        const key = this._prefix + id;
-        const data = localStorage.getItem(key);
-        if (!data) return Promise.reject({ status: 404 });
-        return Promise.resolve(JSON.parse(data));
-      },
-      allDocs: function() {
-        const prefix = this._prefix;
-        const keys = Object.keys(localStorage);
-        const rows = keys
-          .filter(k => k.startsWith(prefix))
-          .map(k => ({ doc: JSON.parse(localStorage.getItem(k)) }));
-        return Promise.resolve({ rows });
-      },
-      remove: function(doc) {
-        const key = this._prefix + doc._id;
-        localStorage.removeItem(key);
-        return Promise.resolve({ ok: true });
-      },
-      bulkDocs: function(docs) {
-        if (!Array.isArray(docs)) {
-          return Promise.reject(new Error('bulkDocs requires an array'));
-        }
-        var results = docs.map(function(doc) {
-          var id = doc._id || doc.id || '';
-          if (id) {
-            localStorage.setItem(this._prefix + id, JSON.stringify(doc));
-          }
-          return { ok: true, id: id, rev: '1-xxx' };
-        }, this);
-        return Promise.resolve({ results: results });
-      },
-      query: function() { return Promise.resolve({ rows: [] }); },
-      sync: function() { return { on: function() {}, cancel: function() {} }; },
-      changes: function() { return { on: function() {}, cancel: function() {} }; }
-    };
-  }
-
-  // CRIA O PouchInit
-  window.PouchInit = {
-    _db: null,
-    
-    init: function(dbName) {
-      var name = dbName || 'grimorio_db';
-      console.log('📦 PouchInit.init(' + name + ')');
-      this._db = new PouchDB(name);
-      return this._db;
-    },
-    
-    getDb: function() { 
-      if (!this._db) this.init('grimorio_db');
-      return this._db; 
-    },
-    
-    save: function(doc) {
-      if (!this._db) this.init('grimorio_db');
-      return this._db.put(doc);
-    },
-    
-    get: function(id) {
-      if (!this._db) this.init('grimorio_db');
-      return this._db.get(id);
-    },
-    
-    getAll: function(type) {
-      if (!this._db) this.init('grimorio_db');
-      return this._db.allDocs({ include_docs: true })
-        .then(result => {
-          return result.rows
-            .map(row => row.doc)
-            .filter(doc => doc.type === type);
-        });
-    },
-    
-    remove: function(id) {
-      if (!this._db) this.init('grimorio_db');
-      return this._db.get(id)
-        .then(doc => this._db.remove(doc));
-    },
-    
-    query: function(view, options) {
-      if (!this._db) this.init('grimorio_db');
-
-      // Tenta executar a query normal
-      return this._db.query(view, options).catch(function(err) {
-        // Se a view não existe (404), faz a busca manual no localStorage
-        if (err.status === 404) {
-          console.warn('⚠️ View "' + view + '" não encontrada. Buscando manualmente...');
-
-          return this._db.allDocs({ include_docs: true })
-            .then(function(result) {
-              var docs = result.rows
-                .map(function(row) { return row.doc; });
-
-              // Se a query for por username, filtra
-              if (view === 'users/by_username' && options && options.key) {
-                docs = docs.filter(function(doc) {
-                  return doc.username === options.key;
-                });
-              }
-
-              // Se a query for por userId, filtra
-              if (view === 'characters/by_userId' && options && options.key) {
-                docs = docs.filter(function(doc) {
-                  return doc.userId === options.key;
-                });
-              }
-
-              return { rows: docs.map(function(doc) { return { doc: doc }; }) };
-            }.bind(this));
-        }
-        throw err;
-      }.bind(this));
-    },
-    
-    sync: function(remoteUrl, options) {
-      if (!this._db) this.init('grimorio_db');
-      return this._db.sync(remoteUrl, options || {});
-    },
-    
-    stopSync: function() {
-      console.log('🛑 Sync interrompido');
-    },
-    
-    getSyncStatus: function() {
-      return { isSyncing: false, remoteUrl: null };
-    },
-    
-    backup: function() {
-      if (!this._db) this.init('grimorio_db');
-      return this._db.allDocs({ include_docs: true })
-        .then(result => {
-          const docs = result.rows.map(row => row.doc);
-          const json = JSON.stringify(docs, null, 2);
-          const blob = new Blob([json], { type: 'application/json' });
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = 'grimorio_backup_' + new Date().toISOString().slice(0,10) + '.json';
-          a.click();
-          URL.revokeObjectURL(url);
-          return docs;
-        });
-    },
-    
-    restore: function(jsonData) {
-      if (!this._db) this.init('grimorio_db');
-      const docs = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
-      return this._db.bulkDocs(docs);
-    },
-    
-    destroy: function() {
-      if (this._db) {
-        const name = this._db._name;
-        const prefix = 'pouch_' + name + '_';
-        const keys = Object.keys(localStorage);
-        keys.filter(k => k.startsWith(prefix)).forEach(k => localStorage.removeItem(k));
-        this._db = null;
-      }
-      return Promise.resolve({ ok: true });
-    }
-  };
-
-  console.log('✅ PouchInit fallback criado!');
+  console.error('❌ PouchInit não encontrado! Verifique se js/db/pouch-init.js foi carregado antes de storage-adapter.js');
 }
 
 // ================================================================
@@ -396,6 +215,25 @@ const StorageAdapter = (() => {
       });
   }
 
+// ================================================================
+  // DOCUMENTOS GENÉRICOS (para mesas e outros tipos)
+  // ================================================================
+
+  function save(doc) {
+    if (!PouchInit) return Promise.reject('PouchInit não inicializado');
+    return PouchInit.save(doc);
+  }
+
+  function get(id) {
+    if (!PouchInit) return Promise.reject('PouchInit não inicializado');
+    return PouchInit.get(id);
+  }
+
+  function remove(id) {
+    if (!PouchInit) return Promise.reject('PouchInit não inicializado');
+    return PouchInit.remove(id);
+  }
+
   // ================================================================
   // PERSONAGENS
   // ================================================================
@@ -556,7 +394,10 @@ const StorageAdapter = (() => {
     loginUser: loginUser,
     recoverAccount: recoverAccount,
     updateUser: updateUser,
-    deleteUser: deleteUser,
+deleteUser: deleteUser,
+    save: save,
+    get: get,
+    remove: remove,
     getCharacters: getCharacters,
     getCharacter: getCharacter,
     saveCharacter: saveCharacter,
@@ -574,4 +415,4 @@ const StorageAdapter = (() => {
 
 // Exporta globalmente
 window.StorageAdapter = StorageAdapter;
-console.log('✅ StorageAdapter carregado com fallback!');
+console.log('✅ StorageAdapter carregado!');
