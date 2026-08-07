@@ -2,6 +2,151 @@
 
 const TableUI = (() => {
 
+  // ── Renderizar Gerenciador de Mesas ──
+  function renderTableManager() {
+    var wrap = document.createElement('div');
+    wrap.className = 'card';
+    wrap.style.marginTop = '16px';
+    
+    var title = document.createElement('div');
+    title.className = 'card-title';
+    title.textContent = '🎲 Mesas e Compartilhamento';
+    wrap.appendChild(title);
+    
+    var createBtn = document.createElement('button');
+    createBtn.className = 'btn-gold';
+    createBtn.textContent = '✦ Criar Nova Mesa';
+    createBtn.style.width = '100%';
+    createBtn.style.marginBottom = '12px';
+    createBtn.addEventListener('click', function() {
+      var name = prompt('Nome da mesa:');
+      if (name) {
+        TableSystem.createTable(name)
+          .then(function() { renderTableManager(); })
+          .catch(function(err) { alert('Erro: ' + err); });
+      }
+    });
+    wrap.appendChild(createBtn);
+    
+    var listContainer = document.createElement('div');
+    listContainer.id = 'table-list';
+    wrap.appendChild(listContainer);
+    
+    TableSystem.getUserTables()
+      .then(function(tables) {
+        if (tables.length === 0) {
+          listContainer.innerHTML = '<p style="color:var(--ink-faint);text-align:center;padding:20px;">Nenhuma mesa. Crie uma ou entre em uma!</p>';
+          return;
+        }
+        
+        tables.forEach(function(table) {
+          var card = document.createElement('div');
+          card.style.background = 'var(--parch-3)';
+          card.style.border = '1px solid var(--border)';
+          card.style.borderRadius = 'var(--r-md)';
+          card.style.padding = '12px';
+          card.style.marginBottom = '8px';
+          card.style.display = 'flex';
+          card.style.justifyContent = 'space-between';
+          card.style.alignItems = 'center';
+          
+          var info = document.createElement('div');
+          info.innerHTML = '<div style="font-weight:600;">' + (table.name || 'Mesa ' + table.id) + '</div><div style="font-size:12px;color:var(--ink-faint);">ID: ' + table.id + '</div>';
+          card.appendChild(info);
+          
+          var actions = document.createElement('div');
+          actions.style.display = 'flex';
+          actions.style.gap = '8px';
+          
+          var enterBtn = document.createElement('button');
+          enterBtn.className = 'btn-ghost';
+          enterBtn.textContent = 'Entrar';
+          enterBtn.addEventListener('click', function() { openTable(table.id); });
+          actions.appendChild(enterBtn);
+          
+          var leaveBtn = document.createElement('button');
+          leaveBtn.className = 'btn-del';
+          leaveBtn.textContent = 'Sair';
+          leaveBtn.style.padding = '6px 12px';
+          leaveBtn.style.border = '1px solid var(--crimson)';
+          leaveBtn.style.borderRadius = 'var(--r)';
+          leaveBtn.style.color = 'var(--crimson)';
+          leaveBtn.addEventListener('click', function() {
+            if (confirm('Sair da mesa?')) {
+              TableSystem.leaveTable(table.id)
+                .then(function() { renderTableManager(); })
+                .catch(function(err) { alert('Erro: ' + err); });
+            }
+          });
+          actions.appendChild(leaveBtn);
+          
+          card.appendChild(actions);
+          listContainer.appendChild(card);
+        });
+        
+        var joinRow = document.createElement('div');
+        joinRow.style.marginTop = '12px';
+        joinRow.style.display = 'flex';
+        joinRow.style.gap = '8px';
+        joinRow.style.alignItems = 'center';
+        
+        var joinInput = document.createElement('input');
+        joinInput.type = 'text';
+        joinInput.placeholder = 'ID da mesa para entrar';
+        joinInput.style.flex = '1';
+        joinInput.id = 'join-table-input';
+        joinRow.appendChild(joinInput);
+        
+        var joinBtn = document.createElement('button');
+        joinBtn.className = 'btn-ghost';
+        joinBtn.textContent = 'Entrar';
+        joinBtn.addEventListener('click', function() {
+          var id = document.getElementById('join-table-input').value.trim();
+          if (id) {
+            TableSystem.joinTable(id)
+              .then(function() {
+                document.getElementById('join-table-input').value = '';
+                renderTableManager();
+              })
+              .catch(function(err) { alert('Erro: ' + err.message); });
+          }
+        });
+        joinRow.appendChild(joinBtn);
+        listContainer.appendChild(joinRow);
+      })
+      .catch(function(err) {
+        listContainer.innerHTML = '<p style="color:var(--red);">Erro ao carregar mesas: ' + err + '</p>';
+      });
+    
+    return wrap;
+  }
+
+  // ── Abrir Mesa ──
+  function openTable(tableId) {
+    var app = document.getElementById('app');
+    app.innerHTML = '';
+    app.appendChild(renderTableScreen(tableId));
+  }
+
+  // ── Verificar link de mesa na URL ──
+  function checkTableLink() {
+    var urlParams = new URLSearchParams(window.location.search);
+    var tableId = urlParams.get('table');
+    
+    if (tableId) {
+      TableSystem.joinTable(tableId)
+        .then(function() {
+          window.history.replaceState({}, document.title, window.location.pathname);
+          openTable(tableId);
+        })
+        .catch(function(err) {
+          alert('Erro ao entrar na mesa: ' + err.message);
+        });
+      return true;
+    }
+    return false;
+  }
+
   // ── Renderizar Lista de Personagens da Mesa ──
   function renderCharactersList(tableId, chars, currentUserId) {
     const container = document.createElement('div');
@@ -379,11 +524,6 @@ const TableUI = (() => {
 
 })();
 
-window.TableUI = {
-  renderTableManager: TableUI.renderTableManager,
-  renderTableScreen: TableUI.renderTableScreen,
-  openTable: TableUI.openTable,
-  checkTableLink: TableUI.checkTableLink,
-  TableSystem: TableUI.TableSystem
-};
+window.TableUI = TableUI;
+console.log('✅ TableUI carregado!');
 

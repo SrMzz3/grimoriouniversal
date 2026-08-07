@@ -1,18 +1,13 @@
-/* js/db/storage-adapter.js — VERSÃO QUE CRIA O PouchInit IMEDIATAMENTE */
+/* js/db/storage-adapter.js — VERSÃO SIMPLIFICADA (funciona SEMPRE) */
 
 // ================================================================
-// CRIA O PouchInit NA HORA — ANTES DE TUDO
+// CRIA O PouchInit IMEDIATAMENTE — CÓDIGO SOLTO, SEM IIFE
 // ================================================================
 
-(function() {
-  // Já existe? Se sim, não faz nada
-  if (typeof window.PouchInit !== 'undefined') {
-    console.log('✅ PouchInit já existe');
-    return;
-  }
-
-  console.warn('⚠️ PouchInit não encontrado! Criando fallback IMEDIATO...');
-
+// Se PouchInit não existir, cria
+if (typeof window.PouchInit === 'undefined') {
+  console.warn('⚠️ PouchInit não encontrado! Criando fallback...');
+  
   // Se PouchDB não existe, cria um falso com localStorage
   if (typeof window.PouchDB === 'undefined') {
     console.warn('⚠️ PouchDB não encontrado! Criando fallback localStorage...');
@@ -32,10 +27,10 @@
       get: function(id) {
         const key = this._prefix + id;
         const data = localStorage.getItem(key);
-        if (!data) return Promise.reject({ status: 404, message: 'Not found' });
+        if (!data) return Promise.reject({ status: 404 });
         return Promise.resolve(JSON.parse(data));
       },
-      allDocs: function(opts = {}) {
+      allDocs: function() {
         const prefix = this._prefix;
         const keys = Object.keys(localStorage);
         const rows = keys
@@ -48,25 +43,33 @@
         localStorage.removeItem(key);
         return Promise.resolve({ ok: true });
       },
-      query: function() {
-        return Promise.resolve({ rows: [] });
+      bulkDocs: function(docs) {
+        if (!Array.isArray(docs)) {
+          return Promise.reject(new Error('bulkDocs requires an array'));
+        }
+        var results = docs.map(function(doc) {
+          var id = doc._id || doc.id || '';
+          if (id) {
+            localStorage.setItem(this._prefix + id, JSON.stringify(doc));
+          }
+          return { ok: true, id: id, rev: '1-xxx' };
+        }, this);
+        return Promise.resolve({ results: results });
       },
-      sync: function() {
-        return { on: function() {}, cancel: function() {} };
-      },
-      changes: function() {
-        return { on: function() {}, cancel: function() {} };
-      }
+      query: function() { return Promise.resolve({ rows: [] }); },
+      sync: function() { return { on: function() {}, cancel: function() {} }; },
+      changes: function() { return { on: function() {}, cancel: function() {} }; }
     };
   }
 
-  // CRIA O PouchInit AGORA MESMO
+  // CRIA O PouchInit
   window.PouchInit = {
     _db: null,
     
     init: function(dbName) {
-      console.log('📦 PouchInit.init(' + dbName + ')');
-      this._db = new PouchDB(dbName || 'grimorio_db');
+      var name = dbName || 'grimorio_db';
+      console.log('📦 PouchInit.init(' + name + ')');
+      this._db = new PouchDB(name);
       return this._db;
     },
     
@@ -103,12 +106,20 @@
     
     query: function(view, options) {
       if (!this._db) this.init();
-      return this._db.query(view, options);
+      // Fallback para query se o índice não existir
+      return this._db.query(view, options).catch(function(err) {
+        console.warn('⚠️ Query fallback para', view, err);
+        // Se o índice não existir, retorna vazio
+        if (err.status === 404) {
+          return { rows: [] };
+        }
+        throw err;
+      });
     },
     
-    sync: function(remoteUrl, options = {}) {
+    sync: function(remoteUrl, options) {
       if (!this._db) this.init();
-      return this._db.sync(remoteUrl, options);
+      return this._db.sync(remoteUrl, options || {});
     },
     
     stopSync: function() {
@@ -154,8 +165,8 @@
     }
   };
 
-  console.log('✅ PouchInit fallback criado com sucesso!');
-})();
+  console.log('✅ PouchInit fallback criado!');
+}
 
 // ================================================================
 // STORAGE ADAPTER
@@ -168,52 +179,28 @@ const StorageAdapter = (() => {
   function init() {
     if (initialized) return Promise.resolve();
     
-    // Só pra garantir que o PouchInit existe (já deve ter sido criado acima)
+    // Garante que o PouchInit existe
     if (typeof PouchInit === 'undefined') {
-      console.error('❌ PouchInit não definido! Criando emergência...');
-      // Recria na hora se por algum motivo não existir
-      window.PouchInit = {
-        _db: null,
-        init: function(dbName) {
-          this._db = new PouchDB(dbName || 'emergency_db');
-          return this._db;
-        },
-        get: function(id) {
-          if (!this._db) this.init();
-          return this._db.get(id);
-        },
-        save: function(doc) {
-          if (!this._db) this.init();
-          return this._db.put(doc);
-        },
-        remove: function(id) {
-          if (!this._db) this.init();
-          return this._db.get(id).then(doc => this._db.remove(doc));
-        },
-        query: function() { return Promise.resolve({ rows: [] }); },
-        sync: function() { return { on: function() {}, cancel: function() {} }; },
-        stopSync: function() {},
-        getSyncStatus: function() { return { isSyncing: false }; },
-        backup: function() { return Promise.resolve([]); },
-        restore: function() { return Promise.resolve(); },
-        destroy: function() { return Promise.resolve({ ok: true }); }
-      };
+      console.error('❌ PouchInit não definido!');
+      return Promise.reject(new Error('PouchInit não inicializado'));
     }
 
     PouchInit.init('grimorio_db');
     initialized = true;
     
-    return migrateFromLocalStorage().catch(() => {});
+    return migrateFromLocalStorage().catch(function(err) {
+      console.warn('⚠️ Migração:', err);
+    });
   }
 
   function migrateFromLocalStorage() {
-    return new Promise((resolve) => {
+    return new Promise(function(resolve) {
       try {
-        const usersJson = localStorage.getItem('grimorio_users');
+        var usersJson = localStorage.getItem('grimorio_users');
         if (usersJson) {
-          const users = JSON.parse(usersJson);
-          users.forEach(user => {
-            const doc = {
+          var users = JSON.parse(usersJson);
+          users.forEach(function(user) {
+            var doc = {
               _id: 'user_' + user.id,
               id: user.id,
               username: user.username,
@@ -235,10 +222,10 @@ const StorageAdapter = (() => {
           console.log('✅ [Migration] Usuários migrados');
         }
 
-        const sessionJson = localStorage.getItem('grimorio_session');
+        var sessionJson = localStorage.getItem('grimorio_session');
         if (sessionJson) {
-          const session = JSON.parse(sessionJson);
-          const doc = {
+          var session = JSON.parse(sessionJson);
+          var doc = {
             _id: 'session_' + session.id,
             userId: session.id,
             username: session.username,
@@ -249,10 +236,10 @@ const StorageAdapter = (() => {
           console.log('✅ [Migration] Sessão migrada');
         }
 
-        const charJson = localStorage.getItem('rpg_grimorio_v2');
+        var charJson = localStorage.getItem('rpg_grimorio_v2');
         if (charJson) {
-          const char = JSON.parse(charJson);
-          const doc = {
+          var char = JSON.parse(charJson);
+          var doc = {
             _id: 'char_' + (char.id || crypto.randomUUID()),
             id: char.id || crypto.randomUUID(),
             ...char,
@@ -280,7 +267,7 @@ const StorageAdapter = (() => {
   function setCurrentUser(user) {
     currentUser = user;
     if (user) {
-      const doc = {
+      var doc = {
         _id: 'session_' + user.id,
         userId: user.id,
         username: user.username,
@@ -295,58 +282,51 @@ const StorageAdapter = (() => {
   }
 
   function loadSession() {
-    const sessionJson = localStorage.getItem('grimorio_session');
+    var sessionJson = localStorage.getItem('grimorio_session');
     if (!sessionJson) return null;
     try { return JSON.parse(sessionJson); }
     catch { return null; }
   }
 
   function loadUserFromSession() {
-    const session = loadSession();
+    var session = loadSession();
     if (!session) return Promise.resolve(null);
     return PouchInit.get('user_' + session.id)
-      .then(doc => { currentUser = doc; return doc; })
-      .catch(() => null);
+      .then(function(doc) { currentUser = doc; return doc; })
+      .catch(function() { return null; });
   }
 
   function registerUser(username, password) {
-    // GARANTE que o PouchInit existe antes de usar
-    if (typeof PouchInit === 'undefined') {
-      console.error('❌ PouchInit não definido em registerUser!');
-      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
-    }
-
     return PouchInit.query('users/by_username', { key: username })
-      .then(result => {
+      .then(function(result) {
         if (result.rows.length > 0) throw new Error('Usuário já existe');
-        const user = {
+        var user = {
           _id: 'user_' + crypto.randomUUID(),
           id: crypto.randomUUID(),
-          username, password,
+          username: username,
+          password: password,
           displayName: username,
-          avatar: '', frame: 'none',
-          background: '', bgBrightness: 25,
-          bio: '', recoveryKeyword: '',
-          characters: [], systems: [],
+          avatar: '',
+          frame: 'none',
+          background: '',
+          bgBrightness: 25,
+          bio: '',
+          recoveryKeyword: '',
+          characters: [],
+          systems: [],
           type: 'user',
           createdAt: new Date().toISOString()
         };
         return PouchInit.save(user);
       })
-      .then(result => PouchInit.get(result._id));
+      .then(function(result) { return PouchInit.get(result._id); });
   }
 
   function loginUser(username, password) {
-    // GARANTE que o PouchInit existe antes de usar
-    if (typeof PouchInit === 'undefined') {
-      console.error('❌ PouchInit não definido em loginUser!');
-      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
-    }
-
     return PouchInit.query('users/by_username', { key: username })
-      .then(result => {
+      .then(function(result) {
         if (result.rows.length === 0) throw new Error('Usuário não encontrado');
-        const user = result.rows[0].doc;
+        var user = result.rows[0].doc;
         if (user.password !== password) throw new Error('Senha incorreta');
         currentUser = user;
         setCurrentUser(user);
@@ -355,40 +335,43 @@ const StorageAdapter = (() => {
   }
 
   function recoverAccount(username, keyword, newPassword) {
-    if (typeof PouchInit === 'undefined') {
-      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
-    }
-
     return PouchInit.query('users/by_username', { key: username })
-      .then(result => {
+      .then(function(result) {
         if (result.rows.length === 0) throw new Error('Usuário não encontrado');
-        const user = result.rows[0].doc;
+        var user = result.rows[0].doc;
         if (user.recoveryKeyword !== keyword) throw new Error('Palavra-chave incorreta');
         user.password = newPassword;
         return PouchInit.save(user);
       })
-      .then(() => ({ message: 'Senha alterada com sucesso' }));
+      .then(function() { return { message: 'Senha alterada com sucesso' }; });
   }
 
   function updateUser(userData) {
-    if (typeof PouchInit === 'undefined') {
-      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
-    }
-
     return PouchInit.get('user_' + userData.id)
-      .then(doc => { Object.assign(doc, userData); return PouchInit.save(doc); })
-      .then(result => { currentUser = result; return result; });
+      .then(function(doc) { 
+        Object.assign(doc, userData); 
+        return PouchInit.save(doc); 
+      })
+      .then(function(result) { 
+        currentUser = result; 
+        return result; 
+      });
   }
 
   function deleteUser(userId) {
-    if (typeof PouchInit === 'undefined') {
-      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
-    }
-
     return PouchInit.remove('user_' + userId)
-      .then(() => PouchInit.query('characters/by_userId', { key: userId, include_docs: true }))
-      .then(result => Promise.all(result.rows.map(row => PouchInit.remove(row.doc._id))))
-      .then(() => { currentUser = null; localStorage.removeItem('grimorio_session'); return { message: 'Usuário excluído' }; });
+      .then(function() {
+        return PouchInit.query('characters/by_userId', { key: userId, include_docs: true });
+      })
+      .then(function(result) {
+        var promises = result.rows.map(function(row) { return PouchInit.remove(row.doc._id); });
+        return Promise.all(promises);
+      })
+      .then(function() {
+        currentUser = null;
+        localStorage.removeItem('grimorio_session');
+        return { message: 'Usuário excluído' };
+      });
   }
 
   // ================================================================
@@ -397,26 +380,19 @@ const StorageAdapter = (() => {
 
   function getCharacters() {
     if (!currentUser) return Promise.resolve([]);
-    if (typeof PouchInit === 'undefined') return Promise.resolve([]);
-    
     return PouchInit.query('characters/by_userId', { key: currentUser.id, include_docs: true })
-      .then(result => result.rows.map(row => row.doc));
+      .then(function(result) { return result.rows.map(function(row) { return row.doc; }); })
+      .catch(function() { return []; });
   }
 
   function getCharacter(charId) {
-    if (typeof PouchInit === 'undefined') {
-      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
-    }
     return PouchInit.get('char_' + charId);
   }
 
   function saveCharacter(charData) {
     if (!currentUser) return Promise.reject('Nenhum usuário logado');
-    if (typeof PouchInit === 'undefined') {
-      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
-    }
     
-    const doc = {
+    var doc = {
       _id: charData._id || (charData.id ? 'char_' + charData.id : 'char_' + crypto.randomUUID()),
       id: charData.id || crypto.randomUUID(),
       userId: currentUser.id,
@@ -465,29 +441,29 @@ const StorageAdapter = (() => {
     };
     
     return PouchInit.save(doc)
-      .then(() => PouchInit.get('user_' + currentUser.id))
-      .then(user => {
+      .then(function() {
+        return PouchInit.get('user_' + currentUser.id);
+      })
+      .then(function(user) {
         if (!user.characters) user.characters = [];
-        if (!user.characters.some(c => c.id === doc.id)) {
+        if (!user.characters.some(function(c) { return c.id === doc.id; })) {
           user.characters.push({ id: doc.id, name: doc.name, sysId: doc.sysId });
           return PouchInit.save(user);
         }
         return user;
       })
-      .then(() => doc);
+      .then(function() { return doc; });
   }
 
   function deleteCharacter(charId) {
     if (!currentUser) return Promise.reject('Nenhum usuário logado');
-    if (typeof PouchInit === 'undefined') {
-      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
-    }
-
     return PouchInit.remove('char_' + charId)
-      .then(() => PouchInit.get('user_' + currentUser.id))
-      .then(user => {
+      .then(function() {
+        return PouchInit.get('user_' + currentUser.id);
+      })
+      .then(function(user) {
         if (user.characters) {
-          user.characters = user.characters.filter(c => c.id !== charId);
+          user.characters = user.characters.filter(function(c) { return c.id !== charId; });
           return PouchInit.save(user);
         }
         return user;
@@ -500,38 +476,31 @@ const StorageAdapter = (() => {
 
   function getSystems() {
     if (!currentUser) return Promise.resolve([]);
-    if (typeof PouchInit === 'undefined') return Promise.resolve([]);
-    return PouchInit.get('user_' + currentUser.id).then(user => user.systems || []).catch(() => []);
+    return PouchInit.get('user_' + currentUser.id)
+      .then(function(user) { return user.systems || []; })
+      .catch(function() { return []; });
   }
 
   function saveSystem(sysData) {
     if (!currentUser) return Promise.reject('Nenhum usuário logado');
-    if (typeof PouchInit === 'undefined') {
-      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
-    }
-
     return PouchInit.get('user_' + currentUser.id)
-      .then(user => {
+      .then(function(user) {
         if (!user.systems) user.systems = [];
-        if (!user.systems.some(s => s.id === sysData.id)) {
+        if (!user.systems.some(function(s) { return s.id === sysData.id; })) {
           user.systems.push(sysData);
           return PouchInit.save(user);
         }
         return user;
       })
-      .then(() => sysData);
+      .then(function() { return sysData; });
   }
 
   function deleteSystem(sysId) {
     if (!currentUser) return Promise.reject('Nenhum usuário logado');
-    if (typeof PouchInit === 'undefined') {
-      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
-    }
-
     return PouchInit.get('user_' + currentUser.id)
-      .then(user => {
+      .then(function(user) {
         if (user.systems) {
-          user.systems = user.systems.filter(s => s.id !== sysId);
+          user.systems = user.systems.filter(function(s) { return s.id !== sysId; });
           return PouchInit.save(user);
         }
         return user;
@@ -542,63 +511,42 @@ const StorageAdapter = (() => {
   // SINCRONIZAÇÃO E BACKUP
   // ================================================================
 
-  function syncWithServer(remoteUrl, options = {}) {
-    if (typeof PouchInit === 'undefined') {
-      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
-    }
-    return PouchInit.sync(remoteUrl, options);
+  function syncWithServer(remoteUrl, options) {
+    return PouchInit.sync(remoteUrl, options || {});
   }
 
-  function stopSync() {
-    if (typeof PouchInit !== 'undefined') PouchInit.stopSync();
-  }
-
-  function getSyncStatus() {
-    if (typeof PouchInit === 'undefined') return { isSyncing: false, remoteUrl: null };
-    return PouchInit.getSyncStatus();
-  }
-
-  function backup() {
-    if (typeof PouchInit === 'undefined') {
-      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
-    }
-    return PouchInit.backup();
-  }
-
-  function restore(jsonData) {
-    if (typeof PouchInit === 'undefined') {
-      return Promise.reject(new Error('Sistema de banco de dados não inicializado'));
-    }
-    return PouchInit.restore(jsonData);
-  }
+  function stopSync() { PouchInit.stopSync(); }
+  function getSyncStatus() { return PouchInit.getSyncStatus(); }
+  function backup() { return PouchInit.backup(); }
+  function restore(jsonData) { return PouchInit.restore(jsonData); }
 
   // ================================================================
   // API PÚBLICA
   // ================================================================
 
   return {
-    init,
-    getCurrentUser,
-    setCurrentUser,
-    loadSession,
-    loadUserFromSession,
-    registerUser,
-    loginUser,
-    recoverAccount,
-    updateUser,
-    deleteUser,
-    getCharacters,
-    getCharacter,
-    saveCharacter,
-    deleteCharacter,
-    getSystems,
-    saveSystem,
-    deleteSystem,
-    syncWithServer,
-    stopSync,
-    getSyncStatus,
-    backup,
-    restore
+    init: init,
+    getCurrentUser: getCurrentUser,
+    setCurrentUser: setCurrentUser,
+    loadSession: loadSession,
+    loadUserFromSession: loadUserFromSession,
+    registerUser: registerUser,
+    loginUser: loginUser,
+    recoverAccount: recoverAccount,
+    updateUser: updateUser,
+    deleteUser: deleteUser,
+    getCharacters: getCharacters,
+    getCharacter: getCharacter,
+    saveCharacter: saveCharacter,
+    deleteCharacter: deleteCharacter,
+    getSystems: getSystems,
+    saveSystem: saveSystem,
+    deleteSystem: deleteSystem,
+    syncWithServer: syncWithServer,
+    stopSync: stopSync,
+    getSyncStatus: getSyncStatus,
+    backup: backup,
+    restore: restore
   };
 })();
 
