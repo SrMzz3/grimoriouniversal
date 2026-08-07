@@ -80,9 +80,9 @@ const StorageAdapter = (() => {
         var charJson = localStorage.getItem('rpg_grimorio_v2');
         if (charJson) {
           var char = JSON.parse(charJson);
-          var doc = {
-            _id: 'char_' + (char.id || crypto.randomUUID()),
-            id: char.id || crypto.randomUUID(),
+var doc = {
+            _id: 'char_' + (char.id || PouchInit.generateId()),
+            id: char.id || PouchInit.generateId(),
             ...char,
             type: 'character',
             userId: currentUser ? currentUser.id : 'unknown'
@@ -167,9 +167,9 @@ const StorageAdapter = (() => {
     return PouchInit.query('users/by_username', { key: username })
       .then(function(result) {
         if (result.rows.length > 0) throw new Error('Usuário já existe');
-        var user = {
-          _id: 'user_' + crypto.randomUUID(),
-          id: crypto.randomUUID(),
+var user = {
+          _id: 'user_' + PouchInit.generateId(),
+          id: PouchInit.generateId(),
           username: username,
           password: password,
           displayName: username,
@@ -316,9 +316,9 @@ function updateUser(userData) {
   function saveCharacter(charData) {
     if (!currentUser) return Promise.reject('Nenhum usuário logado');
     
-    var doc = {
-      _id: charData._id || (charData.id ? 'char_' + charData.id : 'char_' + crypto.randomUUID()),
-      id: charData.id || crypto.randomUUID(),
+var doc = {
+      _id: charData._id || (charData.id ? 'char_' + charData.id : 'char_' + PouchInit.generateId()),
+      id: charData.id || PouchInit.generateId(),
       userId: currentUser.id,
       type: 'character',
       sysId: charData.sysId || 'custom',
