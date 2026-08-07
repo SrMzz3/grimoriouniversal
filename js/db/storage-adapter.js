@@ -74,22 +74,22 @@ if (typeof window.PouchInit === 'undefined') {
     },
     
     getDb: function() { 
-      if (!this._db) this.init();
+      if (!this._db) this.init('grimorio_db');
       return this._db; 
     },
     
     save: function(doc) {
-      if (!this._db) this.init();
+      if (!this._db) this.init('grimorio_db');
       return this._db.put(doc);
     },
     
     get: function(id) {
-      if (!this._db) this.init();
+      if (!this._db) this.init('grimorio_db');
       return this._db.get(id);
     },
     
     getAll: function(type) {
-      if (!this._db) this.init();
+      if (!this._db) this.init('grimorio_db');
       return this._db.allDocs({ include_docs: true })
         .then(result => {
           return result.rows
@@ -99,13 +99,13 @@ if (typeof window.PouchInit === 'undefined') {
     },
     
     remove: function(id) {
-      if (!this._db) this.init();
+      if (!this._db) this.init('grimorio_db');
       return this._db.get(id)
         .then(doc => this._db.remove(doc));
     },
     
     query: function(view, options) {
-      if (!this._db) this.init();
+      if (!this._db) this.init('grimorio_db');
       // Fallback para query se o índice não existir
       return this._db.query(view, options).catch(function(err) {
         console.warn('⚠️ Query fallback para', view, err);
@@ -118,7 +118,7 @@ if (typeof window.PouchInit === 'undefined') {
     },
     
     sync: function(remoteUrl, options) {
-      if (!this._db) this.init();
+      if (!this._db) this.init('grimorio_db');
       return this._db.sync(remoteUrl, options || {});
     },
     
@@ -131,7 +131,7 @@ if (typeof window.PouchInit === 'undefined') {
     },
     
     backup: function() {
-      if (!this._db) this.init();
+      if (!this._db) this.init('grimorio_db');
       return this._db.allDocs({ include_docs: true })
         .then(result => {
           const docs = result.rows.map(row => row.doc);
@@ -148,7 +148,7 @@ if (typeof window.PouchInit === 'undefined') {
     },
     
     restore: function(jsonData) {
-      if (!this._db) this.init();
+      if (!this._db) this.init('grimorio_db');
       const docs = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
       return this._db.bulkDocs(docs);
     },
