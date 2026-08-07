@@ -201,16 +201,47 @@ const StorageAdapter = (() => {
       });
   }
 
-  function recoverAccount(username, keyword, newPassword) {
+function recoverAccount(username, keyword, newPassword) {
     return PouchInit.query('users/by_username', { key: username })
       .then(function(result) {
         if (result.rows.length === 0) throw new Error('Usuário não encontrado');
         var user = result.rows[0].doc;
-        if (user.recoveryKeyword !== keyword) throw new Error('Palavra-chave incorreta');
-        user.password = newPassword;
+
+        // A palavra-chave pode ter sido salva apenas no localStorage (via profile.js),
+        // que usa GrimorioStorage.updateCurrentUser (só grava no localStorage).
+        // Por isso, verificamos também no localStorage antes de concluir que está incorreta.
+        var storedKeyword = user.recoveryKeyword;
+        if (!storedKeyword) {
+          try {
+            var users = JSON.parse(localStorage.getItem('grimorio_users') || '[]');
+            var localUser = users.find(function(u) { return u.id === user.id; });
+            if (localUser && localUser.recoveryKeyword) {
+              storedKeyword = localUser.recoveryKeyword;
+            }
+          } catch (e) {}
+        }
+
+        if (!storedKeyword || storedKeyword !== keyword) {
+          throw new Error('Palavra-chave incorreta');
+        }
+
+user.password = newPassword;
+        user.recoveryKeyword = storedKeyword;
         return PouchInit.save(user);
       })
-      .then(function() { return { message: 'Senha alterada com sucesso' }; });
+      .then(function(result) {
+        // Sincroniza a nova senha também no localStorage para manter consistência
+        try {
+          var users = JSON.parse(localStorage.getItem('grimorio_users') || '[]');
+          var idx = users.findIndex(function(u) { return u.username === username; });
+          if (idx >= 0) {
+            users[idx].password = newPassword;
+            users[idx].recoveryKeyword = keyword;
+            localStorage.setItem('grimorio_users', JSON.stringify(users));
+          }
+        } catch (e) {}
+        return { message: 'Senha alterada com sucesso' };
+      });
   }
 
 function updateUser(userData) {
