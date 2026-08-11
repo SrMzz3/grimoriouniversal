@@ -357,7 +357,7 @@ const SelectScreen = (() => {
     const logoDiv = document.createElement('div');
     logoDiv.className = 'grimorio-logo';
     const logoImg = document.createElement('img');
-    logoImg.src = 'assets/logo.png';
+    logoImg.src = 'assets/logors.png';
     logoImg.alt = 'Grimório';
     logoImg.style.maxWidth = '220px';
     logoDiv.appendChild(logoImg);
