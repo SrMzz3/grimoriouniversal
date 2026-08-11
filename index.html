@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Grimório Universal</title>
+  <link rel="icon" type="image/png" href="assets/logors.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Crimson+Text:ital,wght@0,400;0,600;1,400&family=IM+Fell+English:ital@0;1&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/base.css" />
+  <link rel="stylesheet" href="css/layout.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <link rel="stylesheet" href="css/fx.css" />
+</head>
+<body>
+
+  <!-- Canvas de partículas -->
+  <canvas id="particles-canvas"></canvas>
+
+  <!-- Névoa -->
+  <div class="fog-layer fog-1"></div>
+  <div class="fog-layer fog-2"></div>
+
+  <!-- Controle de som -->
+  <button id="sound-toggle" class="sound-btn" title="Alternar sons">
+    <span id="sound-icon">🔊</span>
+  </button>
+
+  <!-- App root -->
+  <div id="app"></div>
+
+  <!-- ========================================================= -->
+  <!-- PASSO 1: POUCHDB DA CDN                                     -->
+  <!-- ========================================================= -->
+  <script src="https://cdn.jsdelivr.net/npm/pouchdb@8.0.1/dist/pouchdb.min.js"></script>
+
+  <!-- ========================================================= -->
+  <!-- PASSO 2: FALLBACK DE EMERGÊNCIA                           -->
+  <!-- ========================================================= -->
+  <script>
+    // Fallback de emergência — se o PouchDB não carregar
+    if (typeof PouchDB === 'undefined') {
+      console.warn('🔥 Fallback de emergência ativado!');
+      
+      // Cria um PouchDB falso com localStorage
+      window.PouchDB = function(dbName) {
+        this._name = dbName;
+        this._prefix = 'pouch_' + dbName + '_';
+        return this;
+      };
+
+      window.PouchDB.prototype = {
+        put: function(doc) {
+          const key = this._prefix + doc._id;
+          localStorage.setItem(key, JSON.stringify(doc));
+          return Promise.resolve({ ok: true, id: doc._id, rev: '1-xxx' });
+        },
+        get: function(id) {
+          const key = this._prefix + id;
+          const data = localStorage.getItem(key);
+          if (!data) return Promise.reject({ status: 404 });
+          return Promise.resolve(JSON.parse(data));
+        },
+        allDocs: function() {
+          const prefix = this._prefix;
+          const keys = Object.keys(localStorage);
+          const rows = keys
+            .filter(k => k.startsWith(prefix))
+            .map(k => ({ doc: JSON.parse(localStorage.getItem(k)) }));
+          return Promise.resolve({ rows });
+        },
+        remove: function(doc) {
+          const key = this._prefix + doc._id;
+          localStorage.removeItem(key);
+          return Promise.resolve({ ok: true });
+        },
+        query: function() {
+          return Promise.resolve({ rows: [] });
+        },
+        sync: function() {
+          return { on: function() {}, cancel: function() {} };
+        },
+        changes: function() {
+          return { on: function() {}, cancel: function() {} };
+        }
+      };
+
+      // Cria o PouchInit falso
+      window.PouchInit = {
+        _db: null,
+        init: function(dbName) {
+          console.log('📦 Fallback init: ' + dbName);
+          this._db = new PouchDB(dbName);
+          return this._db;
+        },
+        getDb: function() { return this._db; },
+        save: function(doc) {
+          if (!this._db) this.init('fallback');
+          return this._db.put(doc);
+        },
+        get: function(id) {
+          if (!this._db) this.init('fallback');
+          return this._db.get(id);
+        },
+        getAll: function(type) {
+          if (!this._db) this.init('fallback');
+          return this._db.allDocs({ include_docs: true })
+            .then(result => result.rows.map(row => row.doc).filter(doc => doc.type === type));
+        },
+        remove: function(id) {
+          if (!this._db) this.init('fallback');
+          return this._db.get(id).then(doc => this._db.remove(doc));
+        },
+query: function(view, options) {
+          if (!this._db) this.init('fallback');
+          options = options || {};
+          // FALLBACK: busca manual no localStorage
+          return this._db.allDocs({ include_docs: true })
+            .then(function(result) {
+              var docs = result.rows.map(function(row) { return row.doc; });
+              var key = options.key;
+              if (view === 'users/by_username') {
+                docs = docs.filter(function(doc) { return doc.type === 'user'; });
+                if (key) docs = docs.filter(function(doc) { return doc.username === key; });
+              } else if (view === 'characters/by_userId') {
+                docs = docs.filter(function(doc) { return doc.type === 'character' || doc.type === 'shared_character'; });
+                if (key) docs = docs.filter(function(doc) { return doc.userId === key; });
+              } else if (view === 'characters/by_tableId' || view === 'rolls/by_tableId' || view === 'messages/by_tableId') {
+                if (key) docs = docs.filter(function(doc) { return doc.tableId === key; });
+              }
+              return { rows: docs.map(function(doc) { return { doc: doc }; }) };
+            });
+        },
+        generateId: function() {
+          if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+          return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            var r = Math.random() * 16 | 0;
+            var v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+          });
+        },
+        sync: function() { return { on: function() {}, cancel: function() {} }; },
+        stopSync: function() {},
+        getSyncStatus: function() { return { isSyncing: false }; },
+        backup: function() {
+          const prefix = 'pouch_fallback_';
+          const keys = Object.keys(localStorage);
+          const docs = keys.filter(k => k.startsWith(prefix)).map(k => JSON.parse(localStorage.getItem(k)));
+          const json = JSON.stringify(docs, null, 2);
+          const blob = new Blob([json], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'backup.json';
+          a.click();
+          return Promise.resolve(docs);
+        },
+        restore: function(jsonData) {
+          if (!this._db) this.init('fallback');
+          const docs = typeof jsonData === 'string' ? JSON.parse(jsonData) : jsonData;
+          return this._db.bulkDocs(docs);
+        },
+        destroy: function() {
+          const prefix = 'pouch_fallback_';
+          const keys = Object.keys(localStorage);
+          keys.filter(k => k.startsWith(prefix)).forEach(k => localStorage.removeItem(k));
+          this._db = null;
+          return Promise.resolve({ ok: true });
+        }
+      };
+
+      console.log('✅ Fallback de emergência ativado!');
+    }
+  </script>
+
+<!-- ========================================================= -->
+  <!-- PASSO 3: DB LAYER                                          -->
+  <!-- ========================================================= -->
+  <script src="js/db/pouch-init.js"></script>
+  <script src="js/db/storage-adapter.js"></script>
+
+  <!-- ========================================================= -->
+  <!-- PASSO 4: DADOS DOS SISTEMAS                               -->
+  <!-- ========================================================= -->
+  <script src="js/data/dnd.js"></script>
+  <script src="js/data/op.js"></script>
+
+  <!-- ========================================================= -->
+  <!-- PASSO 5: ENGINE                                           -->
+  <!-- ========================================================= -->
+  <script src="js/engine/dice.js"></script>
+  <script src="js/engine/calc.js"></script>
+
+  <!-- ========================================================= -->
+  <!-- PASSO 6: CLASSES                                          -->
+  <!-- ========================================================= -->
+  <script src="js/classes/Character.js"></script>
+  <script src="js/classes/DnDCharacter.js"></script>
+  <script src="js/classes/OPCharacter.js"></script>
+  <script src="js/classes/CustomCharacter.js"></script>
+  <script src="js/classes/CharacterFactory.js"></script>
+
+  <!-- ========================================================= -->
+  <!-- PASSO 7: UI                                               -->
+  <!-- ========================================================= -->
+  <script src="js/ui/particles.js"></script>
+  <script src="js/ui/select.js"></script>
+  <script src="js/ui/build.js"></script>
+  <script src="js/ui/sheet.js"></script>
+  <script src="js/ui/profile.js"></script>
+  <script src="js/ui/table.js"></script>
+  <script src="js/ui/table-ui.js"></script>
+
+  <!-- ========================================================= -->
+  <!-- PASSO 8: APP PRINCIPAL E LOGIN                           -->
+  <!-- ========================================================= -->
+  <script src="js/ui/login.js"></script>
+  <script src="js/app.js"></script>
+
+</body>
+</html>

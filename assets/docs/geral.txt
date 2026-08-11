@@ -1,0 +1,387 @@
+================================================================================
+                   GRIMÓRIO UNIVERSAL - EXPLICAÇÃO COMPLETA DO CÓDIGO
+================================================================================
+
+1.  VISÃO GERAL DO PROJETO
+================================================================================
+
+O Grimório Universal é uma aplicação web (Single Page Application - SPA) para
+gerenciamento de fichas de RPG. Ela roda inteiramente no navegador, utilizando
+localStorage para persistência de dados, e oferece suporte a três sistemas:
+
+- D&D 5e (Dungeons & Dragons 5ª edição)
+- Ordem Paranormal (RPG brasileiro de horror/investigação)
+- Sistema Próprio (criação customizada de atributos, perícias e dados)
+
+A aplicação possui efeitos visuais imersivos: partículas animadas em canvas,
+névoa de fundo, animações CSS (glitch, brilho, fade), e sons sintetizados via
+Web Audio API. Tudo isso para simular a atmosfera de um grimório mágico e
+antigo.
+
+Tecnologias utilizadas:
+- HTML5 + CSS3 (sem frameworks)
+- JavaScript puro (modularizado com padrão IIFE e objetos globais)
+- Canvas 2D para partículas
+- Web Audio API para sons
+- localStorage para dados de usuários, personagens e sessão
+
+
+2.  ESTRUTURA DE DIRETÓRIOS E ARQUIVOS
+================================================================================
+
+A estrutura de pastas é organizada por responsabilidade:
+
+/
+├── index.html                 # Ponto de entrada da aplicação
+├── css/
+│   ├── base.css              # Reset, variáveis CSS, tipografia global
+│   ├── layout.css            # Grids, responsividade, posicionamento
+│   ├── components.css        # Cards, botões, barras, tabelas, etc.
+│   └── fx.css                # Animações, keyframes, glitch, transições
+├── js/
+│   ├── app.js                # Estado global, roteador, helpers, boot
+│   ├── data/
+│   │   ├── dnd.js            # Dados estáticos do D&D 5e (raças, classes, etc.)
+│   │   ├── op.js             # Dados do Ordem Paranormal
+│   │   ├── races.js          # (aux) Raças detalhadas
+│   │   ├── classes.js        # (aux) Classes detalhadas (template)
+│   │   ├── backgrounds.js    # (aux) Antecedentes
+│   │   ├── feats.js          # (aux) Talentos
+│   │   ├── equipment.js      # (aux) Equipamentos e armas
+│   │   └── spells.js         # (aux) Magias (template)
+│   ├── engine/
+│   │   ├── dice.js           # Rolagem de dados, expressões, sons
+│   │   └── calc.js           # Cálculos específicos (mod, HP, CA, etc.)
+│   ├── ui/
+│   │   ├── login.js          # Tela de login/registro
+│   │   ├── select.js         # Tela inicial (seleção de sistema e fichas)
+│   │   ├── build.js          # Criação de personagem (D&D, OP, Custom)
+│   │   ├── sheet.js          # Ficha completa (abas, edição, rolagens)
+│   │   └── particles.js      # Sistema de partículas no canvas
+│   └── (arquivos auxiliares de autenticação e storage, mas a lógica
+│        principal de login está em login.js e app.js)
+└── assets/                    # (opcional) imagens como logo1.png
+
+
+3.  ARQUIVOS CSS - A CAMADA VISUAL
+================================================================================
+
+Os quatro arquivos CSS trabalham em cascata (da base para os detalhes):
+
+3.1. base.css
+- Reset global (box-sizing, margens, padding).
+- Definição das variáveis CSS (:root) que controlam toda a paleta:
+  --ink (texto), --parch (pergaminho escuro), --gold (dourado D&D),
+  --op-cyan (ciano OP), --green, --red, --purple, etc.
+- Tipografia: 'Crimson Text' para corpo, 'Cinzel' para títulos.
+- Estilo global de inputs, scrollbar, seleção de texto.
+
+3.2. layout.css
+- Posicionamento dos elementos fixos: canvas de partículas, camadas de névoa,
+  botão de som.
+- Definição dos grids principais: .sheet-layout (duas colunas) e
+  .sheet-layout-3 (três colunas).
+- Classes utilitárias para colunas, linhas e grids (g2, g3, g4).
+- Responsividade: quebra para uma coluna em telas menores e exibe a
+  barra de navegação inferior (mobile-nav) com abas.
+
+3.3. components.css
+- Todos os componentes reutilizáveis:
+  * Ornamentos (divisórias com texto).
+  * Cards de sistema (dnd-card, op-card, custom-card) com efeitos de hover.
+  * Cards de opção (raças, classes, origens).
+  * Linhas de atributos (stat-row) com input e modificador.
+  * Botões: .btn-gold, .btn-ghost, .btn-add, .btn-del, .btn-dice, .btn-roll.
+  * Tabs (tab-bar, tab-btn).
+  * Barras de status (bar-wrap, bar-fill) com cores específicas.
+  * Pips (bolinhas) para espaços de magia e trilhas.
+  * Tabelas (rpg-table) e linhas de perícias (skill-row).
+  * Log de rolagens (log-box, log-entry).
+  * Preview de atributos na tela de build.
+
+3.4. fx.css
+- Keyframes para animações: fadeUp, fadeIn, shimmer, glitchText, goldPulse,
+  diceSpin, scanline, hpDanger, trilhaPip, etc.
+- Classes de entrada: .fu, .fu2, .fu3, .fu4 para animação sequencial.
+- Efeitos específicos: glitch em cards OP, brilho pulsante em cards D&D,
+  rotação do dado ao clicar, pulso da barra de HP quando crítica.
+
+
+4.  ARQUIVOS JAVASCRIPT - A LÓGICA E INTERATIVIDADE
+================================================================================
+
+4.1. app.js - O Coração do Sistema
+-------------------------------------------------------------------------------
+- Estado global (App.state): guarda tela atual, sistema, rascunho de build,
+  personagem carregado, histórico de rolagens, aba ativa, etc.
+- Roteador: App.go(screen, sysId) altera a tela e chama App.render(), que
+  renderiza a view apropriada (SelectScreen, BuildScreen ou SheetScreen).
+- Helpers de DOM: função el() para criar elementos de forma simplificada.
+- Helpers de UI: objeto global UI com métodos para criar divisórias,
+  barras de progresso, e atualizá-las.
+- Persistência: funções saveChar, loadChar, clearChar usando localStorage
+  (chave "rpg_grimorio_v2").
+- GrimorioStorage: objeto que gerencia usuários, sessão, personagens e
+  sistemas dentro do localStorage (chaves "grimorio_users" e
+  "grimorio_session").
+- Boot: no DOMContentLoaded, verifica se há sessão ativa; se não, renderiza
+  tela de login; se sim, inicializa o App (partículas, sons e tela inicial).
+
+4.2. login.js - Autenticação
+-------------------------------------------------------------------------------
+- Renderiza a tela de login com campos de usuário e senha.
+- Lida com registro: valida se usuário já existe, cria novo objeto com
+  id (UUID), username, password, characters: [] e systems: [], salva em
+  "grimorio_users".
+- Lida com login: verifica credenciais, se ok, salva sessão em
+  "grimorio_session" e recarrega a página.
+- Função logout global (window.logout) remove a sessão e recarrega.
+
+4.3. select.js - Tela Inicial
+-------------------------------------------------------------------------------
+- Renderiza a página com:
+  * Barra do usuário logado (com logout).
+  * Hero com logo, título e subtítulo.
+  * Grid com os cards dos sistemas: D&D, Ordem Paranormal, Sistema Próprio
+    e Biblioteca da Comunidade (em breve).
+  * Lista de fichas salvas do usuário (obtidas via GrimorioStorage).
+- Ao clicar em um card de sistema, chama App.go("build", sysId) ou
+  App.go("custom").
+- Ao clicar em "Abrir" em uma ficha salva, carrega o personagem via
+  App.setChar() e chama App.go("sheet").
+
+4.4. build.js - Criação de Personagem
+-------------------------------------------------------------------------------
+- Três funções principais: renderDnD(), renderOP(), renderCustom().
+- Cada uma monta um formulário interativo:
+  * D&D: nome, nível, raça (com sub-raça), classe (com subclasse). Preview
+    de atributos (com bônus raciais) e HP calculado. Ao confirmar, cria o
+    objeto do personagem com stats, hp, slots de magia, etc., e salva.
+  * OP: nome, idade, classe (3 opções), origem (11 opções). Preview de
+    atributos, PV, PE, Sanidade, Defesa. Ao confirmar, cria o objeto com
+    stats, barras, trilhas iniciais, etc.
+  * Custom: tema visual, nome do sistema, nome do personagem, atributos
+    (adicionar/remover com nome e valor), perícias (adicionar/remover),
+    dados disponíveis, HP base. Ao confirmar, cria objeto com
+    sysId: "custom" e todos os campos customizados.
+- Gerencia o estado temporário (App.build) durante a construção.
+- Após a criação, salva via GrimorioStorage e navega para a ficha.
+
+4.5. sheet.js - Ficha do Personagem
+-------------------------------------------------------------------------------
+- Renderiza a ficha completa com layout de duas colunas.
+- Coluna esquerda:
+  * Atributos: cada atributo com input, modificador calculado (D&D: (valor-10)/2,
+    OP: valor-1, Custom: sem mod) e botão de rolagem.
+  * Barras de status: HP (sempre), e para OP também PE e Sanidade. Cada barra
+    com campos para atual e máximo, atualização em tempo real.
+  * Específicos: para D&D, exibe espaços de magia (pips clicáveis). Para OP,
+    exibe seletor de NEX e trilhas (com pips de progresso).
+- Coluna direita:
+  * Abas (tabs): Perícias, Habilidades, Equipamentos, Anotações, Dados.
+  * Perícias: lista todas as perícias do sistema (ou customizadas) com
+    modificador calculado e botão para rolar.
+  * Habilidades: tabela editável (Nome, Bônus/Custo, Descrição).
+  * Equipamentos: tabela editável (Item, Qtd, Peso/Obs).
+  * Anotações: textarea livre.
+  * Dados: painel com modificador, etiqueta, botões de dados (d4, d6, ...)
+    e histórico de rolagens (log) com exibição de críticos/falhas.
+- Todas as edições são salvas automaticamente via App.saveChar().
+- Função switchTab() permite trocar de aba programaticamente.
+
+4.6. particles.js - Sistema de Partículas
+-------------------------------------------------------------------------------
+- Utiliza canvas 2D para desenhar partículas flutuantes.
+- Configurações específicas para cada sistema: cores (dourado para D&D,
+  ciano para OP, roxo para Custom), quantidade, tamanho, velocidade, opacidade.
+- As partículas se movem para cima, piscam (twinkle) e são recriadas quando
+  saem da tela ou expiram.
+- Ao mudar de sistema, metade das partículas é recriada com a nova
+  configuração (transição suave).
+- Iniciado automaticamente pelo App.init().
+
+4.7. engine/dice.js - Rolagem e Sons
+-------------------------------------------------------------------------------
+- rollDie(sides): retorna número aleatório entre 1 e sides.
+- rollExpression(expr): interpreta expressões como "2d6+3" ou "4d6kh3"
+  (keep highest) e retorna objeto com rolls, used, total, mod, etc.
+- Sons sintetizados via Web Audio API:
+  * dice(): clique + ruído para rolagem comum.
+  * crit(): fanfarra ascendente para crítico.
+  * fail(): tom descendente para falha.
+  * magic(), glitch(), page(), transition(), click() para diferentes
+    contextos.
+- toggleSound() e isSoundEnabled() controlam a ativação.
+
+4.8. engine/calc.js - Cálculos Específicos
+-------------------------------------------------------------------------------
+- Objeto dnd: funções mod(), profBonus(), hp(), ac(), skillBonus(),
+  spellSlots(), savingThrow(), passivePerception(), initiative(),
+  carryingCapacity().
+- Objeto op: bonus(), bonusStr(), testBonus(), pv(), pe(), sanidade(),
+  defesa(), nexFromXP(), nexLabel().
+- rollStat(sysId, label, key, stats): rola um atributo conforme o sistema.
+  * D&D: 1d20 + mod.
+  * OP: 1d20 por ponto de atributo (máximo), pega o maior.
+  * Custom: 1d20 puro.
+- rollSkill() e rollCustomDice() para rolagens específicas.
+- makeRollResult() gera objeto padronizado para o log, com classe
+  (crit/fail/norm) e toca o som correspondente.
+
+4.9. data/dnd.js - Dados Estáticos do D&D
+-------------------------------------------------------------------------------
+- Contém objeto DND com:
+  * statKeys, statLabels, diceSet.
+  * races: lista de raças com bônus, descrição, subraces.
+  * classes: lista de classes com hd, saves, prof, desc, subclasses.
+  * skills: lista de perícias com atributo associado.
+  * proficiencyBonus: array de bônus por nível (0 a 20).
+  * spellSlots: matriz de slots por nível de magia e nível de personagem.
+  * Funções auxiliares: profBonus, modStr, ac, initiative, hp,
+    skillBonus, etc.
+
+4.10. data/op.js - Dados Estáticos do Ordem Paranormal
+-------------------------------------------------------------------------------
+- Contém objeto OP com:
+  * statKeys, statLabels, diceSet.
+  * statDefault, statMin, statMax.
+  * classes: Combatente, Especialista, Ocultista (com pe base, desc,
+    prof, features).
+  * origins: lista de origens (Nerd, Policial, etc.) com bônus em
+    atributo e perícia.
+  * skills: lista de perícias com atributo associado.
+  * trilhas: array com os nomes.
+  * nex: array com valores percentuais (0,5,15,...,99).
+  * Funções: calcDefesa, calcPV, calcPE, calcSanidade, nexLabel.
+
+
+5.  FLUXO DE DADOS E PERSISTÊNCIA
+================================================================================
+
+5.1. Autenticação e Sessão
+- localStorage chave "grimorio_users": array de objetos { id, username,
+  password, characters: [], systems: [] }.
+- localStorage chave "grimorio_session": objeto { id, username }.
+- Login: verifica credenciais, cria sessão, recarrega.
+- Logout: remove sessão, recarrega.
+
+5.2. Personagens
+- Cada personagem é um objeto com campos comuns (id, sysId, name, stats,
+  hpCur, hpMax, abilities, equip, notes) e campos específicos:
+  * D&D: level, cls, race, subrace, subclass, slots, skillProfs, etc.
+  * OP: age, origin, peCur, peMax, sanCur, sanMax, nexLevel, trilhas, etc.
+  * Custom: customSysName, customStatKeys, customStatLabels,
+    customSkills, customDiceSet, customTheme.
+- Os personagens são salvos dentro do array characters do usuário logado.
+- GrimorioStorage.saveCharacter() atualiza a lista do usuário.
+- GrimorioStorage.getCharacters() retorna a lista para exibição.
+
+5.3. Estado em Memória (App.state)
+- screen: define a tela atual.
+- sysId: sistema em uso.
+- build: rascunho do personagem em criação.
+- char: personagem carregado na ficha (referência).
+- rollLog: histórico de rolagens (array).
+- activeTab: aba ativa na ficha.
+
+5.4. Ciclo de Vida de um Personagem
+1. Criação: build.js monta o objeto, chama App.setChar() e
+   GrimorioStorage.saveCharacter().
+2. Carregamento: select.js lista as fichas; ao clicar em "Abrir",
+   chama App.setChar() e App.go("sheet").
+3. Edição: sheet.js modifica os campos do objeto e chama
+   App.saveChar() a cada alteração (persistência automática).
+4. Exclusão: (futuro) GrimorioStorage.deleteCharacter(id).
+
+
+6.  EXPERIÊNCIA DO USUÁRIO E IMERSÃO
+================================================================================
+
+6.1. Interface Visual
+- Tema escuro com pergaminho envelhecido e dourado.
+- Ícones e ornamentos (✦, ⁂) que reforçam o tema medieval/mágico.
+- Cards com efeitos de hover distintos: D&D dourado pulsante, OP com glitch
+  e ciano, Custom com borda tracejada.
+
+6.2. Animações e Transições
+- Fade-in suave (fadeUp) em todas as telas e elementos.
+- Efeitos de brilho, pulsação e movimento nas partículas.
+- Glitch em elementos do Ordem Paranormal (texto tremido, scanline).
+- Rotação do dado ao clicar (diceSpin).
+- Barra de HP com pulso vermelho quando abaixo de 25%.
+
+6.3. Feedback Sonoro
+- Sons para rolagem de dados (clique + ruído), crítico (fanfarra),
+  falha (tom descendente), clique em botões, virar página, magia.
+- Controle de som no canto superior direito (alterna ligado/desligado).
+
+6.4. Responsividade
+- Layout adapta para tablet e mobile com coluna única.
+- Barra de navegação inferior (mobile-nav) com ícones para abas na ficha.
+
+
+7.  FUNCIONALIDADES ESPECÍFICAS POR SISTEMA
+================================================================================
+
+7.1. D&D 5e
+- Atributos: Força, Destreza, Constituição, Inteligência, Sabedoria, Carisma.
+- Cálculo automático de modificadores, CA, Iniciativa, Bônus de Proficiência.
+- HP calculado com base na classe e Constituição.
+- Espaços de magia por nível (1 a 9) com pips clicáveis.
+- Perícias listadas com modificador e rolagem.
+- Suporte a raças, sub-raças, classes e subclasses.
+
+7.2. Ordem Paranormal
+- Atributos: Força, Agilidade, Intelecto, Presença, Vigor.
+- Cálculo automático de PV, PE, Sanidade, Defesa.
+- NEX (Nível de Exposição ao Caos): seletor de 0% a 99% (passos de 5).
+- Trilhas: Sobrevivência, Habilidades, Poderes, Rituais (cada uma com 3 níveis).
+- Origens com bônus específicos.
+
+7.3. Sistema Próprio (Custom)
+- Atributos definidos pelo usuário (nome e valor base).
+- Perícias definidas pelo usuário (lista de nomes).
+- Dados disponíveis personalizáveis (separados por vírgula).
+- HP base definido pelo usuário.
+- Tema visual escolhido (Arcano, Tecnológico, Sombrio, Minimalista).
+- (Recursos personalizados e aparência baseada em tema ainda em
+  desenvolvimento, mas a estrutura já existe no código).
+
+
+8.  PENDÊNCIAS E MELHORIAS FUTURAS (ROADMAP)
+================================================================================
+
+Conforme os arquivos COMMUNITY_ROADMAP.md, custom.txt e pendencias.txt:
+
+- Corrigir NEX (Ordem Paranormal) e defesa automática.
+- Adicionar modificadores de perícia e sistema de armas.
+- Rolagens personalizadas e exclusão de ficha.
+- Telas de rituais e magias (D&D e OP).
+- Melhorar login (hash de senha), tema visual, fundo, partículas.
+- Grimório animado (virar páginas, glitches avançados, runas dinâmicas).
+- Biblioteca da Comunidade: publicar, favoritar, duplicar sistemas,
+  guia do criador, pesquisa por tags, avaliações.
+- Integração com Mesas (sessões de jogo).
+- Recursos personalizados na ficha customizada.
+- Aparência baseada em tema (Custom) - parcialmente implementado.
+
+
+9.  CONSIDERAÇÕES TÉCNICAS FINAIS
+================================================================================
+
+- A aplicação é completamente client-side, sem backend. Todos os dados são
+  armazenados no localStorage do navegador, portanto não há compartilhamento
+  entre dispositivos ou navegadores.
+- A segurança é básica: senhas em texto puro (apenas para demonstração).
+- Código organizado em módulos IIFE e objetos globais, facilitando a
+  manutenção e expansão.
+- Uso intensivo de Web APIs (Canvas, Audio, localStorage) que são suportadas
+  pelos navegadores modernos.
+- O design é focado em imersão e usabilidade, com feedback visual e sonoro
+  para ações do usuário.
+- O sistema é extensível: novos sistemas podem ser adicionados seguindo o
+  padrão de dados e UI já estabelecido.
+
+================================================================================
+FIM DA EXPLICAÇÃO
+================================================================================
