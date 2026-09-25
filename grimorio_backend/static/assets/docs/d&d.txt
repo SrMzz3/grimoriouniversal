@@ -1,0 +1,39 @@
+D&D 5E
+
+Arquivo:
+js/data/dnd.js
+
+Contém:
+
+- Raças
+- Classes
+- Perícias
+- Dados
+- Slots de magia
+
+Raças:
+- Humano
+- Elfo Alto
+- Elfo da Floresta
+- Anão da Colina
+- Anão da Montanha
+- Halfling
+- Tiefling
+- Draconato
+- Gnomo
+- Meio-Elfo
+- Meio-Orc
+
+Classes:
+- Bárbaro
+- Bardo
+- Clérigo
+- Druida
+- Guerreiro
+- Monge
+- Paladino
+- Patrulheiro
+- Ladino
+- Feiticeiro
+- Bruxo
+- Mago

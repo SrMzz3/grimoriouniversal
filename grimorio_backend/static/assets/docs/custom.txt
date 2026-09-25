@@ -1,0 +1,17 @@
+SISTEMA PRÓPRIO
+
+Arquivo:
+build.js
+
+Permite:
+
+- Criar atributos
+- Criar perícias
+- Criar recursos
+- Definir dados
+
+Falta:
+
+- Recursos personalizados na ficha
+- Aparência baseada em tema
+- Sistemas compartilháveis
