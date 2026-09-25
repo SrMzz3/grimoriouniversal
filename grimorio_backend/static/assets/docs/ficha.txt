@@ -1,0 +1,23 @@
+FICHA DE PERSONAGEM
+
+Arquivo:
+js/ui/sheet.js
+
+Responsável por:
+
+- HP
+- Sanidade
+- PE
+- Defesa
+- Perícias
+- Habilidades
+- Inventário
+- Dados
+- Notas
+
+Futuras abas:
+
+- Magias
+- Rituais
+- Ataques
+- Histórico
