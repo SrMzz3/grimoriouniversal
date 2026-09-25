@@ -1,0 +1,27 @@
+PENDÊNCIAS
+
+ALTA PRIORIDADE
+
+[ ] Corrigir NEX
+[ ] Corrigir defesa automática
+[ ] Adicionar modificadores de perícia
+[ ] Sistema de armas
+[ ] Rolagens personalizadas
+[ ] Exclusão de ficha
+[ ] Tela de rituais
+[ ] Tela de magias
+
+MÉDIA PRIORIDADE
+
+[ ] Melhorar login
+[ ] Melhorar tema visual
+[ ] Melhorar fundo
+[ ] Melhorar partículas
+[ ] Melhorar responsividade
+
+BAIXA PRIORIDADE
+
+[ ] Grimório animado
+[ ] Virar páginas
+[ ] Glitches avançados
+[ ] Runas dinâmicas
